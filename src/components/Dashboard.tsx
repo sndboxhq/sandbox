@@ -3,6 +3,7 @@ import { CustomSelect } from "./ui/CustomSelect";
 import {
   Archive,
   ArrowRight,
+  Bookmark,
   Bot,
   Clock3,
   Code2,
@@ -44,6 +45,19 @@ import { EmptyState, ErrorState, LoadingSkeleton } from "./ui/States";
 import { useToast } from "./ui/Toast";
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "../workspaceState";
 import { isTextEntryTarget } from "../useKeyboardShortcuts";
+import {
+  createDashboardSavedView,
+  dashboardSavedViewMatches,
+  deleteDashboardSavedView,
+  MAX_DASHBOARD_SAVED_VIEWS,
+  readDashboardSavedViews,
+  renameDashboardSavedView,
+  restoreDashboardSavedView,
+  type DashboardSavedView,
+  type DashboardSavedViewState,
+  validateSavedViewName,
+  writeDashboardSavedViews,
+} from "../dashboardSavedViews";
 
 type FilterKey = "all" | "favorites" | "scheduled" | "failed" | "archived";
 type DashboardTab = "workflows" | "templates";
@@ -73,6 +87,13 @@ export function Dashboard() {
   const [sort, setSort] = useState(() => remembered?.sortOrder ?? "modified");
   const [filter, setFilter] = useState<FilterKey>(() => remembered?.workflowFilter ?? "all");
   const [folder, setFolder] = useState(() => remembered?.folder ?? "");
+  const [savedViews, setSavedViews] = useState<DashboardSavedView[]>(readDashboardSavedViews);
+  const [activeSavedViewId, setActiveSavedViewId] = useState<string>();
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const [savedViewName, setSavedViewName] = useState("");
+  const [manageViewsOpen, setManageViewsOpen] = useState(false);
+  const [renamingViewId, setRenamingViewId] = useState<string>();
+  const [renameValue, setRenameValue] = useState("");
   const [running, setRunning] = useState<string>();
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -88,6 +109,23 @@ export function Dashboard() {
   const [organizeFolder, setOrganizeFolder] = useState("");
   const [tags, setTags] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const currentViewState = (): DashboardSavedViewState => ({ search, workflowFilter: filter, folder, sortOrder: sort as DashboardSavedViewState["sortOrder"] });
+  const persistSavedViews = (next: DashboardSavedView[]) => {
+    if (!writeDashboardSavedViews(next)) {
+      toast.push("Saved views could not be stored on this device.", "error");
+      return false;
+    }
+    setSavedViews([...next].sort((a, b) => b.updatedAt - a.updatedAt));
+    return true;
+  };
+  const applySavedView = (savedView: DashboardSavedView) => {
+    setTab("workflows");
+    setSearch(savedView.state.search);
+    setFilter(savedView.state.workflowFilter);
+    setFolder(savedView.state.folder);
+    setSort(savedView.state.sortOrder);
+    setActiveSavedViewId(savedView.id);
+  };
   const load = async () => {
     setLoading(true);
     setError(undefined);
@@ -112,6 +150,10 @@ export function Dashboard() {
   useEffect(() => {
     updateWorkspaceSnapshot(current => ({ ...current, dashboard: { activeTab: tab, search, workflowFilter: filter, folder, sortOrder: sort, templateCategory } }));
   }, [tab, search, filter, folder, sort, templateCategory]);
+  useEffect(() => {
+    const active = savedViews.find(view => view.id === activeSavedViewId);
+    if (active && !dashboardSavedViewMatches(currentViewState(), active)) setActiveSavedViewId(undefined);
+  }, [search, filter, folder, sort, savedViews, activeSavedViewId]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       const target = event.target;
@@ -280,11 +322,52 @@ export function Dashboard() {
     setFilter("all");
     setFolder("");
     setTemplateCategory("all");
+    setActiveSavedViewId(undefined);
+  };
+  const saveCurrentView = () => {
+    const created = createDashboardSavedView(savedViews, savedViewName, currentViewState());
+    if (!created) return;
+    if (persistSavedViews([created, ...savedViews])) {
+      setActiveSavedViewId(created.id);
+      setSaveViewOpen(false);
+      setSavedViewName("");
+      toast.push(`Saved view “${created.name}”.`, "success");
+    }
+  };
+  const renameSavedView = () => {
+    if (!renamingViewId) return;
+    const next = renameDashboardSavedView(savedViews, renamingViewId, renameValue);
+    if (!next) return;
+    if (persistSavedViews(next)) {
+      setRenamingViewId(undefined);
+      setRenameValue("");
+    }
+  };
+  const removeSavedView = (id: string) => {
+    const { views, deleted } = deleteDashboardSavedView(savedViews, id);
+    if (!deleted || !persistSavedViews(views)) return;
+    if (activeSavedViewId === id) setActiveSavedViewId(undefined);
+    toast.push(`Deleted view “${deleted.name}”.`, "info", { label: "Undo", onAction: () => {
+      const restored = restoreDashboardSavedView(readDashboardSavedViews(), deleted);
+      if (!restored || !writeDashboardSavedViews(restored)) {
+        toast.push("The saved view could not be restored.", "error");
+        return;
+      }
+      setSavedViews(restored.sort((a, b) => b.updatedAt - a.updatedAt));
+    } });
   };
   const activeFilters =
     tab === "templates"
       ? Boolean(search || templateCategory !== "all")
       : Boolean(search || filter !== "all" || folder);
+  const validSavedViewName = validateSavedViewName(savedViewName, savedViews);
+  const validRename = renamingViewId ? validateSavedViewName(renameValue, savedViews, renamingViewId) : undefined;
+  const describeSavedView = (savedView: DashboardSavedView) => [
+    savedView.state.search ? `Search: ${savedView.state.search}` : "All names",
+    savedView.state.workflowFilter === "all" ? "All workflows" : savedView.state.workflowFilter,
+    savedView.state.folder ? `Folder: ${savedView.state.folder}` : "All folders",
+    `Sort: ${savedView.state.sortOrder.replace("-", " ")}`,
+  ].join(" · ");
   return (
     <main className="content">
       <header className="page-header">
@@ -392,6 +475,32 @@ export function Dashboard() {
               <option value="last-run">Last run</option>
               <option value="next-run">Next run</option>
             </CustomSelect>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button className="button dashboard-views-trigger" aria-label="Saved workflow views">
+                  <Bookmark size={13} />
+                  Views
+                  {savedViews.length ? <span>{savedViews.length}</span> : null}
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content className="menu dashboard-views-menu" align="end">
+                  <DropdownMenu.Label className="menu-label">Saved views</DropdownMenu.Label>
+                  <DropdownMenu.Item disabled={savedViews.length >= MAX_DASHBOARD_SAVED_VIEWS} onSelect={() => setSaveViewOpen(true)}>
+                    Save current view…
+                  </DropdownMenu.Item>
+                  {savedViews.length > 0 && <DropdownMenu.Separator />}
+                  {savedViews.map(savedView => (
+                    <DropdownMenu.Item key={savedView.id} onSelect={() => applySavedView(savedView)}>
+                      <Bookmark size={12} fill={activeSavedViewId === savedView.id ? "currentColor" : "none"} />
+                      {savedView.name}
+                    </DropdownMenu.Item>
+                  ))}
+                  <DropdownMenu.Separator />
+                  <DropdownMenu.Item onSelect={() => setManageViewsOpen(true)}>Manage saved views…</DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           </>
         ) : (
           <CustomSelect
@@ -555,6 +664,35 @@ export function Dashboard() {
           )}
         </>
       )}
+      <Dialog
+        open={saveViewOpen}
+        onOpenChange={(open) => { setSaveViewOpen(open); if (!open) setSavedViewName(""); }}
+        title="Save workflow view"
+        description="Save the current workflow search, filters, folder, and sort order on this device."
+        footer={<><button className="button" onClick={() => setSaveViewOpen(false)}>Cancel</button><button className="button primary" disabled={!validSavedViewName || savedViews.length >= MAX_DASHBOARD_SAVED_VIEWS} onClick={saveCurrentView}>Save view</button></>}
+      >
+        <label className="field">
+          <span>View name</span>
+          <input autoFocus aria-label="View name" value={savedViewName} maxLength={48} onChange={(event) => setSavedViewName(event.target.value)} />
+        </label>
+        {savedViewName && !validSavedViewName && <div className="error-banner">Use a unique name between 1 and 48 characters.</div>}
+        {savedViews.length >= MAX_DASHBOARD_SAVED_VIEWS && <div className="info-note">You can save up to {MAX_DASHBOARD_SAVED_VIEWS} views. Delete one before adding another.</div>}
+        <div className="saved-view-summary"><b>Current criteria</b><span>{describeSavedView({ id: "current", name: "Current", state: currentViewState(), createdAt: 0, updatedAt: 0 })}</span></div>
+      </Dialog>
+      <Dialog
+        open={manageViewsOpen}
+        onOpenChange={(open) => { setManageViewsOpen(open); if (!open) { setRenamingViewId(undefined); setRenameValue(""); } }}
+        title="Manage saved views"
+        description="Saved views are stored locally on this device."
+      >
+        <div className="saved-view-list">
+          {savedViews.length === 0 ? <p className="muted">No saved views yet.</p> : savedViews.map(savedView => (
+            <div className="saved-view-row" key={savedView.id}>
+              {renamingViewId === savedView.id ? <div className="saved-view-rename"><input aria-label={`Rename ${savedView.name}`} autoFocus value={renameValue} maxLength={48} onChange={(event) => setRenameValue(event.target.value)} />{renameValue && !validRename && <small>Use a unique name between 1 and 48 characters.</small>}<div><button className="button" onClick={() => { setRenamingViewId(undefined); setRenameValue(""); }}>Cancel</button><button className="button primary" disabled={!validRename} onClick={renameSavedView}>Save</button></div></div> : <><button className="saved-view-apply" onClick={() => { applySavedView(savedView); setManageViewsOpen(false); }}><b>{savedView.name}</b><small>{describeSavedView(savedView)}</small></button><div className="saved-view-row-actions"><button className="button" aria-label={`Rename ${savedView.name}`} onClick={() => { setRenamingViewId(savedView.id); setRenameValue(savedView.name); }}>Rename</button><button className="button danger-text" aria-label={`Delete ${savedView.name}`} onClick={() => removeSavedView(savedView.id)}>Delete</button></div></>}
+            </div>
+          ))}
+        </div>
+      </Dialog>
       <Dialog
         open={createOpen}
         onOpenChange={setCreateOpen}
