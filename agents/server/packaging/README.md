@@ -26,7 +26,7 @@ The installer:
 - installs `/etc/sandbox-runner/config.toml` without overwriting an existing config;
 - installs the hardened `sandbox-runner.service` systemd unit without starting it.
 
-The guided setup replaces the packaged placeholder after validating every answer and preserves the original as `config.toml.bak`. The `workspace_id` and `environment_id` must be UUIDs, the control-plane URL must use HTTPS except for localhost development, and every workflow directory or network destination must be explicitly allowed.
+The guided setup replaces the packaged placeholder after validating every answer and preserves the original as `config.toml.bak`. It retains the installed config's `root:sandbox-runner` ownership and `0640` permissions, so the service account can continue to read it after setup or a guarded reconfiguration. The `workspace_id` and `environment_id` must be UUIDs, the control-plane URL must use HTTPS except for localhost development, and every workflow directory or network destination must be explicitly allowed.
 
 Validate the config:
 

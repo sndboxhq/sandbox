@@ -615,6 +615,14 @@ fn write_config(path: &Path, data: &[u8], force: bool) -> Result<(), CliError> {
         println!("Backup: {}", backup.display());
     }
     let temporary = parent.join(format!(".config.{}.tmp", std::process::id()));
+    // `setup` normally runs with sudo, but the installed service reads this
+    // file as sandbox-runner. Preserve ownership of the replaced configuration
+    // so an atomic rewrite never changes root:sandbox-runner 0640 into root:root.
+    #[cfg(unix)]
+    let existing_ownership = fs::metadata(path).ok().map(|metadata| {
+        use std::os::unix::fs::MetadataExt;
+        (metadata.uid(), metadata.gid())
+    });
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -634,6 +642,10 @@ fn write_config(path: &Path, data: &[u8], force: bool) -> Result<(), CliError> {
     }
     drop(file);
     #[cfg(unix)]
+    if let Some((uid, gid)) = existing_ownership {
+        preserve_owner(&temporary, uid, gid)?;
+    }
+    #[cfg(unix)]
     fs::rename(&temporary, path).map_err(|error| {
         CliError::filesystem("Could not atomically install the configuration", error)
     })?;
@@ -646,6 +658,24 @@ fn write_config(path: &Path, data: &[u8], force: bool) -> Result<(), CliError> {
         }
         fs::rename(&temporary, path)
             .map_err(|error| CliError::filesystem("Could not install the configuration", error))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn preserve_owner(path: &Path, uid: u32, gid: u32) -> Result<(), CliError> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        CliError::invalid_input("Configuration path contains an unsupported NUL byte.")
+    })?;
+    // SAFETY: the pathname is NUL-terminated; uid/gid are copied from the file
+    // being replaced; and only the new temporary file is changed before rename.
+    if unsafe { libc::chown(path.as_ptr(), uid, gid) } != 0 {
+        return Err(CliError::filesystem(
+            "Could not preserve configuration ownership",
+            io::Error::last_os_error(),
+        ));
     }
     Ok(())
 }
@@ -1664,6 +1694,24 @@ mod tests {
             next_backup_path(&config),
             directory.path().join("config.toml.bak.1")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacing_a_config_preserves_its_owner_and_group() {
+        use std::os::unix::fs::MetadataExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("config.toml");
+        fs::write(&config, "old configuration").unwrap();
+        let before = fs::metadata(&config).unwrap();
+
+        write_config(&config, b"new configuration\n", true).unwrap();
+
+        let after = fs::metadata(&config).unwrap();
+        assert_eq!(after.uid(), before.uid());
+        assert_eq!(after.gid(), before.gid());
+        assert_eq!(fs::read_to_string(config).unwrap(), "new configuration\n");
     }
 
     #[test]
