@@ -89,6 +89,9 @@ import { ConfirmDialog, Dialog, FocusDialog } from "./ui/Dialog";
 import { IssueNotice, IssueSummary } from "./ui/IssueNotice";
 import { useToast } from "./ui/Toast";
 import { Tooltip } from "./ui/Tooltip";
+import { clearWorkflowDraft, draftUsesEarlierBase, readWorkflowDraft, writeWorkflowDraft, type WorkflowDraft } from "../workflowDrafts";
+import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "../workspaceState";
+import { isTextEntryTarget, useKeyboardShortcuts } from "../useKeyboardShortcuts";
 
 const nodeTypes = { workflow: WorkflowNodeCard };
 const AccessibleWorkflowEditor = lazy(() =>
@@ -199,7 +202,8 @@ export function WorkflowEditor() {
   const [baseline, setBaseline] = useState(() =>
     JSON.stringify(activeWorkflow),
   );
-  const [selectedNodeId, setSelectedNodeId] = useState<string>();
+  const rememberedEditor = useMemo(() => readWorkspaceSnapshot()?.editors[activeWorkflow!.id], [activeWorkflow]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>(() => rememberedEditor?.selectedNodeId);
   const [auxiliaryTab, setAuxiliaryTab] = useState<"accessible" | "inspector">(
     "inspector",
   );
@@ -216,7 +220,7 @@ export function WorkflowEditor() {
   const [run, setRun] = useState<ExecutionRecord>();
   const [testDataExecutions,setTestDataExecutions]=useState<ExecutionRecord[]>([]);
   const [testDataExecutionId,setTestDataExecutionId]=useState("");
-  const [bottomOpen, setBottomOpen] = useState(false);
+  const [bottomOpen, setBottomOpen] = useState(() => rememberedEditor?.executionDrawerOpen ?? false);
   const [saveState, setSaveState] = useState<
     "saved" | "unsaved" | "saving" | "failed"
   >("saved");
@@ -231,7 +235,12 @@ export function WorkflowEditor() {
   const [pendingRevisionId, setPendingRevisionId] = useState<string>();
   const [pendingSideEffectTest, setPendingSideEffectTest] = useState(false);
   const [testingNode, setTestingNode] = useState(false);
-  const [accessibleEditorOpen, setAccessibleEditorOpen] = useState(false);
+  const [accessibleEditorOpen, setAccessibleEditorOpen] = useState(() => rememberedEditor?.accessibleEditorOpen ?? false);
+  const [draftPrompt, setDraftPrompt] = useState<WorkflowDraft>();
+  const draftWarningShown = useRef(false);
+  const wasDirty = useRef(false);
+  const actionSerial = useRef(0);
+  const undoRef = useRef<() => void>(() => undefined);
   const [aiChatOpen, setAiChatOpen] = useState(false);
   const [aiChatContext, setAiChatContext] =
     useState<AiWorkflowChatContext>();
@@ -297,6 +306,7 @@ export function WorkflowEditor() {
   };
   const commit = useCallback(
     (next: Workflow) => {
+      actionSerial.current += 1;
       past.current.push(structuredClone(workflow));
       if (past.current.length > 50) past.current.shift();
       future.current = [];
@@ -310,6 +320,25 @@ export function WorkflowEditor() {
   );
   const goBack = () =>
     dirty && confirmBeforeLeaving ? setLeaveOpen(true) : setView("workflows");
+  useEffect(() => {
+    updateWorkspaceSnapshot(current => ({ ...current, workflowId: workflow.id, editors: { ...current.editors, [workflow.id]: { selectedNodeId, executionDrawerOpen: bottomOpen, accessibleEditorOpen, visitedAt: Date.now() } } }));
+  }, [workflow.id, selectedNodeId, bottomOpen, accessibleEditorOpen]);
+  useEffect(() => {
+    const draft = readWorkflowDraft(workflow.id);
+    if (draft) setDraftPrompt(draft);
+  }, [workflow.id]);
+  useEffect(() => {
+    if (!dirty) { if (wasDirty.current) clearWorkflowDraft(workflow.id); wasDirty.current = false; return; }
+    wasDirty.current = true;
+    const timer = window.setTimeout(() => {
+      const result = writeWorkflowDraft(workflow, activeWorkflow!.updatedAt);
+      if (result !== "saved" && !draftWarningShown.current) {
+        draftWarningShown.current = true;
+        toast.push(result === "too-large" ? "Recovery draft is too large to store locally." : "Recovery draft could not be saved on this device.", "info");
+      }
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [dirty, workflow, activeWorkflow, toast]);
   useEffect(() => {
     if (accessibleEditorDefault) setAccessibleEditorOpen(true);
   }, [accessibleEditorDefault]);
@@ -417,6 +446,7 @@ export function WorkflowEditor() {
       setWorkflow(saved);
       setBaseline(JSON.stringify(saved));
       setSaveState("saved");
+      clearWorkflowDraft(saved.id);
       toast.push("Workflow saved.", "success");
       return true;
     } catch (error) {
@@ -581,6 +611,7 @@ export function WorkflowEditor() {
           );
           return { ...candidate, inputBindings };
         });
+      const deletionAction = actionSerial.current + 1;
       commit({
         ...workflow,
         nodes,
@@ -589,8 +620,12 @@ export function WorkflowEditor() {
         ),
       });
       setSelectedNodeId(undefined);
+      toast.push("Node deleted.", "info", { label: "Undo", onAction: () => {
+        if (actionSerial.current !== deletionAction) return;
+        undoRef.current();
+      } });
     },
-    [workflow, commit, confirmNodeDeletion],
+    [workflow, commit, confirmNodeDeletion, toast],
   );
   const duplicate = useCallback(
     (id: string) => {
@@ -610,21 +645,25 @@ export function WorkflowEditor() {
   const undo = useCallback(() => {
     const previous = past.current.pop();
     if (previous) {
+      actionSerial.current += 1;
       future.current.push(structuredClone(workflow));
       setWorkflow(previous);
     }
   }, [workflow]);
+  undoRef.current = undo;
   const redo = useCallback(() => {
     const next = future.current.pop();
     if (next) {
+      actionSerial.current += 1;
       past.current.push(structuredClone(workflow));
       setWorkflow(next);
     }
   }, [workflow]);
-  useEffect(() => {
+  useKeyboardShortcuts((e) => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest("input,textarea,select,.custom-select,[contenteditable=true]")) {
+      if (target.closest("[role=dialog],[role=alertdialog]")) return;
+      if (isTextEntryTarget(target)) {
         if (e.key === "Escape") (target as HTMLElement).blur();
         return;
       }
@@ -641,6 +680,9 @@ export function WorkflowEditor() {
       } else if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
         e.shiftKey ? redo() : undo();
+      } else if (mod && e.shiftKey && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        void test();
       } else if (
         (e.key === "Delete" || e.key === "Backspace") &&
         selectedNodeId
@@ -657,9 +699,8 @@ export function WorkflowEditor() {
         setPicker({ open: true, position: { x: 360, y: 220 } });
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [doSave, doRun, duplicate, redo, removeNode, selectedNodeId, undo]);
+    handler(e);
+  }, [doSave, doRun, duplicate, redo, removeNode, selectedNodeId, undo, test]);
   const addNode = (type: NodeType) => {
     if (isTrigger(type) && workflow.nodes.some((n) => isTrigger(n.type))) {
       setIssues([
@@ -1460,6 +1501,15 @@ export function WorkflowEditor() {
           ))}
           {!revisions.length && <div className="drawer-empty"><History size={18}/><b>No saved revisions</b></div>}
         </div>
+      </Dialog>
+      <Dialog
+        open={Boolean(draftPrompt)}
+        onOpenChange={(open) => { if (!open) setDraftPrompt(undefined); }}
+        title="Restore recovery draft?"
+        description={draftPrompt && draftUsesEarlierBase(draftPrompt, activeWorkflow!) ? "This draft was made against an earlier saved version. Restoring it replaces only the in-memory editor state; it is not saved until you explicitly Save." : "Restoring replaces only the in-memory editor state; it is not saved until you explicitly Save."}
+        footer={<><button className="button" onClick={() => { if (draftPrompt) clearWorkflowDraft(draftPrompt.workflowId); setDraftPrompt(undefined); }}>Discard draft</button><button className="button primary" onClick={() => { if (!draftPrompt) return; setWorkflow(structuredClone(draftPrompt.workflow)); setDraftPrompt(undefined); }}>Restore draft</button></>}
+      >
+        <p>This recovery draft is stored only on this device. Choosing Restore keeps it until a successful explicit Save.</p>
       </Dialog>
       <ConfirmDialog
         open={leaveOpen}

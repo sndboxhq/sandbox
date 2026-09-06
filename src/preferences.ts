@@ -15,6 +15,7 @@ export interface AppPreferences {
   colorScheme: ColorScheme;
   darkSurface: DarkSurface;
   startView: StartView;
+  restoreLastWorkspace: boolean;
   dateDisplay: DateDisplay;
   reduceMotion: boolean;
   increasedContrast: boolean;
@@ -39,6 +40,7 @@ export const defaultPreferences: AppPreferences = {
   colorScheme: "system",
   darkSurface: "charcoal",
   startView: "workflows",
+  restoreLastWorkspace: false,
   dateDisplay: "relative",
   reduceMotion: false,
   increasedContrast: false,
@@ -77,6 +79,7 @@ export function normalisePreferences(value: unknown, legacy = false): AppPrefere
     colorScheme: schemes.has(input.colorScheme as ColorScheme) ? input.colorScheme as ColorScheme : legacy ? "dark" : defaultPreferences.colorScheme,
     darkSurface: surfaces.has((input.darkSurface ?? input.surfaceTheme) as DarkSurface) ? (input.darkSurface ?? input.surfaceTheme) as DarkSurface : defaultPreferences.darkSurface,
     startView: startViews.has(input.startView as StartView) ? input.startView as StartView : defaultPreferences.startView,
+    restoreLastWorkspace: typeof input.restoreLastWorkspace === "boolean" ? input.restoreLastWorkspace : defaultPreferences.restoreLastWorkspace,
     dateDisplay: dateDisplays.has(input.dateDisplay as DateDisplay) ? input.dateDisplay as DateDisplay : defaultPreferences.dateDisplay,
     reduceMotion: typeof input.reduceMotion === "boolean" ? input.reduceMotion : defaultPreferences.reduceMotion,
     increasedContrast: typeof input.increasedContrast === "boolean" ? input.increasedContrast : defaultPreferences.increasedContrast,

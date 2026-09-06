@@ -22,18 +22,20 @@ import { Status } from "./Status";
 import { ConfirmDialog, Dialog } from "./ui/Dialog";
 import { EmptyState, ErrorState, LoadingSkeleton } from "./ui/States";
 import { useToast } from "./ui/Toast";
+import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "../workspaceState";
 
 export function HistoryView() {
   const { workflows, selectedExecution, selectExecution, openWorkflow } =
     useAppStore();
   const toast = useToast();
   const [items, setItems] = useState<ExecutionRecord[]>([]);
-  const [search, setSearch] = useState("");
-  const [workflowId, setWorkflowId] = useState("");
-  const [status, setStatus] = useState<ExecutionStatus | "">("");
-  const [trigger, setTrigger] = useState("");
-  const [after, setAfter] = useState("");
-  const [before, setBefore] = useState("");
+  const remembered = useMemo(() => readWorkspaceSnapshot()?.history, []);
+  const [search, setSearch] = useState(() => remembered?.search ?? "");
+  const [workflowId, setWorkflowId] = useState(() => remembered?.workflowId ?? "");
+  const [status, setStatus] = useState<ExecutionStatus | "">(() => remembered?.status as ExecutionStatus | "" ?? "");
+  const [trigger, setTrigger] = useState(() => remembered?.trigger ?? "");
+  const [after, setAfter] = useState(() => remembered?.startDate ?? "");
+  const [before, setBefore] = useState(() => remembered?.endDate ?? "");
   const [cursor, setCursor] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -44,6 +46,9 @@ export function HistoryView() {
     const timer = window.setTimeout(() => setDebounced(search), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
+  useEffect(() => {
+    updateWorkspaceSnapshot(current => ({ ...current, history: { search, workflowId, status, trigger, startDate: after, endDate: before } }));
+  }, [search, workflowId, status, trigger, after, before]);
   const query = useMemo<ExecutionQuery>(
     () => ({
       search: debounced || undefined,

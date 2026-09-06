@@ -30,6 +30,7 @@ import type {
 } from "../types";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { ConfirmDialog, FocusDialog } from "./ui/Dialog";
+import { clearWorkspaceAndRecovery } from "../workspaceState";
 
 const defaults: BrowserProfileSettings = {
   viewportWidth: 1280,
@@ -78,6 +79,7 @@ export function SettingsView() {
   const [error, setError] = useState<string>();
   const [settingsSearch, setSettingsSearch] = useState("");
   const [resetOpen, setResetOpen] = useState(false);
+  const [clearRecoveryOpen, setClearRecoveryOpen] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<DesktopUpdateCheckResult>();
   const [profileAction, setProfileAction] = useState<{
@@ -212,6 +214,12 @@ export function SettingsView() {
                 <option value="workflows">Workflows</option>
                 <option value="history">Run history</option>
               </SelectPreference>
+              <PreferenceToggle
+                label="Resume previous workspace"
+                description="Restore local screens, filters, and editor context when sndbox launches. Recovery drafts stay on this device."
+                checked={preferences.restoreLastWorkspace}
+                onChange={(restoreLastWorkspace) => preferences.update({ restoreLastWorkspace })}
+              />
               <SelectPreference
                 label="Date and time"
                 description="Show timestamps relative to now or with your system locale."
@@ -233,6 +241,7 @@ export function SettingsView() {
                   preferences.update({ confirmBeforeLeaving })
                 }
               />
+              <button className="button" onClick={() => setClearRecoveryOpen(true)}>Clear remembered workspace and recovery drafts</button>
             </PreferencePanel>
           )}
           {section === "appearance" && (
@@ -615,6 +624,15 @@ export function SettingsView() {
           preferences.reset();
           setResetOpen(false);
         }}
+      />
+      <ConfirmDialog
+        open={clearRecoveryOpen}
+        onOpenChange={setClearRecoveryOpen}
+        title="Clear local workspace recovery?"
+        description="This removes remembered screens, recovery drafts, and canvas viewports from this device. Saved workflows, revisions, history, and preferences are unchanged."
+        confirmLabel="Clear local recovery"
+        dangerous
+        onConfirm={() => { clearWorkspaceAndRecovery(); setClearRecoveryOpen(false); }}
       />
       <ConfirmDialog
         open={Boolean(profileAction)}

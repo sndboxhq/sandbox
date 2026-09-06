@@ -154,7 +154,7 @@ sudo -u sandbox-runner /usr/local/bin/sandbox-runner validate
 - `setup` replaces only the recognisable packaged placeholder; any other existing configuration requires `--force`.
 - Forced setup backs up the old file and refuses to reconfigure an already-paired identity.
 - Config is fully parsed, policy-checked, and trust-key-checked before it is installed.
-- Config replacement uses a temporary file and atomic rename; Linux permissions are `0640`.
+- Config replacement uses a temporary file and atomic rename; it preserves the installed config ownership and Linux permissions are `0640`.
 - `pair` and `run` refuse root to prevent unsafe private-key and state ownership.
 - The token prompt disables terminal echo; if echo cannot be disabled, no token is read.
 - Pairing refuses to replace an existing identity.
