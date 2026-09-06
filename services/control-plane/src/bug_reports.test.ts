@@ -4,7 +4,7 @@ import { DiscordBugReportSink, formatDiscordBugReport, type BugReportInput } fro
 const report: BugReportInput = {
   summary: "Web Builder preview stays blank",
   description: "The generated localhost page has no visible content.",
-  diagnostics: { "App version": "0.7.8-beta.1" }
+  diagnostics: { "App version": "0.7.9-beta.1" }
 };
 
 describe("DiscordBugReportSink", () => {
@@ -19,7 +19,7 @@ describe("DiscordBugReportSink", () => {
         timestamp: "2026-09-01T12:00:00.000Z"
       }]
     });
-    expect(JSON.stringify(body)).toContain("0.7.8-beta.1");
+    expect(JSON.stringify(body)).toContain("0.7.9-beta.1");
     expect(JSON.stringify(body)).toContain("credentials and workflow content are never included");
   });
 

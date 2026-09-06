@@ -109,7 +109,7 @@ describe("control-plane API", () => {
   it("accepts bounded first-party bug reports without a user webhook",async()=>{
     const submit=vi.fn(async()=>({delivered:true as const,provider:"discord" as const,status:204,reportId:"BUG-1234ABCD"}));
     const deps={...dependencies([]),bugReports:{submit}},server=await createServer(deps);
-    const payload={summary:"Code editor loses diagnostics",description:"The error list disappears after changing language.",diagnostics:{"App version":"0.7.8-beta.1"}};
+    const payload={summary:"Code editor loses diagnostics",description:"The error list disappears after changing language.",diagnostics:{"App version":"0.7.9-beta.1"}};
     const response=await server.inject({method:"POST",url:"/v1/support/bug-reports",headers:{"idempotency-key":"bug-report-request-0001"},payload});
     expect(response.statusCode,response.body).toBe(200);expect(response.json()).toEqual({delivered:true,provider:"discord",status:204,reportId:"BUG-1234ABCD"});
     expect(submit).toHaveBeenCalledWith(payload);expect(deps.sessions.verify).not.toHaveBeenCalled();
@@ -387,7 +387,7 @@ describe("control-plane API", () => {
     vi.mocked(deps.repository.createRunnerPairingChallenge).mockResolvedValue({ challengeId, challenge: "challenge-value-with-enough-entropy-123", expiresAt: new Date(Date.now()+600_000).toISOString() });
     vi.mocked(deps.sessions.verify).mockResolvedValue({ ...session, principalType: "personal_access_token", credentialScopes: ["runners.manage"], workspaceRestrictions: [workspaceId] });
     const server = await createServer(deps);
-    const payload = { devicePublicKeyDerBase64: der, operatingSystem: "linux", architecture: "x86_64", applicationVersion: "0.7.8-beta.1", protocolVersion: 2, pluginRuntimeVersion: "0.7.8-beta.1", capabilities: {}, tags: ["self-hosted"] };
+    const payload = { devicePublicKeyDerBase64: der, operatingSystem: "linux", architecture: "x86_64", applicationVersion: "0.7.9-beta.1", protocolVersion: 2, pluginRuntimeVersion: "0.7.9-beta.1", capabilities: {}, tags: ["self-hosted"] };
     const accepted = await server.inject({ method: "POST", url: "/v1/runners/pairing/challenges", headers: { authorization: "Bearer pairing-token", "x-sandbox-request-time": new Date().toISOString() }, payload });
     expect(accepted.statusCode, accepted.body).toBe(200);
     vi.mocked(deps.sessions.verify).mockResolvedValue({ ...session, principalType: "personal_access_token", credentialScopes: ["workflows.view"], workspaceRestrictions: [workspaceId] });

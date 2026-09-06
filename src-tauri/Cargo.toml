@@ -1,6 +1,6 @@
 [package]
 name = "sandbox-app"
-version = "0.7.8-beta.1"
+version = "0.7.9-beta.1"
 description = "Local-first visual workflow automation"
 authors = ["sndbox"]
 edition = "2021"

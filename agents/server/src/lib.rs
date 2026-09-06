@@ -12,5 +12,5 @@ pub mod plugin_manager;
 pub mod provider_adapter;
 
 pub const RUNNER_PROTOCOL_VERSION: u16 = 2;
-pub const ENGINE_VERSION: &str = "0.7.8-beta.1";
-pub const PLUGIN_RUNTIME_VERSION: &str = "0.7.8-beta.1";
+pub const ENGINE_VERSION: &str = "0.7.9-beta.1";
+pub const PLUGIN_RUNTIME_VERSION: &str = "0.7.9-beta.1";
