@@ -14,6 +14,7 @@ import type {
 } from "@sandbox/api-client";
 import { brand } from "@sandbox/brand";
 import { launchRelease } from "@sandbox/content";
+import { ActionFeedback } from "@sandbox/product-ui";
 import {
   Activity,
   ArrowRight,
@@ -38,9 +39,11 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { authenticatedClient } from "../../lib/auth";
+import { workspaceContextCookie } from "../../lib/workspace-context";
 import {
   createOrganisationAction,
   createRoleAction,
@@ -60,6 +63,7 @@ import { PersonalTokenIssuer } from "../SecurityControls";
 import { AccountDangerZone } from "../AccountDangerZone";
 import { SubmitButton } from "../SubmitButton";
 import { RunnerPairing } from "../RunnerPairing";
+import { PortalActionForm } from "../PortalActionForm";
 import "./workspace.css";
 
 export const dynamic = "force-dynamic";
@@ -98,7 +102,8 @@ export default async function Page({
   searchParams: SearchParams;
 }) {
   const { section } = await params;
-  const query = await searchParams;
+  const requestedQuery = await searchParams;
+  const query = requestedQuery.workspaceId ? requestedQuery : { ...requestedQuery, workspaceId: (await cookies()).get(workspaceContextCookie)?.value };
   const api = await authenticatedClient();
   if (!api)
     return (
@@ -183,18 +188,14 @@ async function OperationsPage({
   const environments = value<{ items: Array<{ environmentId: string; environment: string }> }>(results[2])?.items ?? [];
   const online = runners.filter((runner) => runner.status === "online" || runner.status === "busy").length;
   const activeWork = runners.reduce((total, runner) => total + runner.currentWorkload, 0);
+  const unavailable = ["runners", "runner pools", "environments"].filter((_, index) => results[index]?.status === "rejected");
 
   return (
     <main className="portal-page operations-page">
       <PageHead title="Runner operations" description="Pair and manage Linux runners for this workspace." />
+      {unavailable.length > 0 && <ActionFeedback tone="error" className="overview-degraded">Some runner data is unavailable: {unavailable.join(", ")}. Existing controls remain usable; refresh to retry.</ActionFeedback>}
       {workspace ? (
         <>
-          <section className="workspace-switcher operations-switcher">
-            <form method="get">
-              <label>Workspace<select name="workspaceId" defaultValue={workspace.id}>{organisations.flatMap((organisation) => organisation.workspaces.map((item) => <option key={item.id} value={item.id}>{organisation.name} / {item.name}</option>))}</select></label>
-              <button className="portal-secondary">Switch workspace</button>
-            </form>
-          </section>
           <section className="operations-setup">
             <div><h2>Add a Linux runner</h2><p>Create a one-time, workspace-scoped pairing token and finish setup on the Linux host.</p></div>
             <RunnerPairing organisations={organisations} selectedWorkspaceId={workspace.id} />
@@ -217,8 +218,8 @@ async function OperationsPage({
                   <div className="runner-workload"><small>WORKLOAD</small><strong>{runner.currentWorkload}</strong></div>
                   <span className={`runner-status ${runner.status}`}><i />{runner.status}</span>
                   <div className="runner-actions">
-                    {nextStatus && <form action={updateRunnerStatusAction}><input type="hidden" name="workspaceId" value={workspace.id} /><input type="hidden" name="runnerId" value={runner.runnerId} /><input type="hidden" name="status" value={nextStatus} /><button title={nextStatus === "draining" ? "Drain runner" : "Resume runner"}>{nextStatus === "draining" ? <Pause /> : <Play />}{nextStatus === "draining" ? "Drain" : "Resume"}</button></form>}
-                    <form action={revokeRunnerAction}><input type="hidden" name="workspaceId" value={workspace.id} /><input type="hidden" name="runnerId" value={runner.runnerId} /><button className="runner-revoke" title="Revoke runner"><Trash2 />Revoke</button></form>
+                    {nextStatus && <PortalActionForm action={updateRunnerStatusAction} hidden={{ workspaceId: workspace.id, runnerId: runner.runnerId, status: nextStatus }} submitLabel={nextStatus === "draining" ? "Drain" : "Resume"} pendingLabel="Updating…" />}
+                    <PortalActionForm action={revokeRunnerAction} hidden={{ workspaceId: workspace.id, runnerId: runner.runnerId }} submitLabel="Revoke" pendingLabel="Revoking…" dangerous confirmTitle={`Revoke ${runner.displayName}?`} confirmDescription="This runner will immediately lose access to the workspace. Pair it again to restore access." />
                   </div>
                 </article>
               );
@@ -284,12 +285,17 @@ async function OrganisationsPage({
     value<{ items: OrganisationRole[] }>(enterprise[0])?.items ?? [];
   const sso = value<{ items: SsoConnection[] }>(enterprise[1])?.items ?? [];
   const scim = value<{ items: ScimToken[] }>(enterprise[2])?.items ?? [];
+  const unavailable = [
+    ...["members", "runners", "approvals", "deployments", "runner pools", "environments", "governance"].filter((_, index) => results[index]?.status === "rejected"),
+    ...["roles", "single sign-on", "SCIM credentials"].filter((_, index) => enterprise[index]?.status === "rejected"),
+  ];
   return (
     <main className="portal-page workspace-page">
       <PageHead
         title="Workspaces"
         description="Manage access, reviews and runtime state for each place your team works."
       />
+      {unavailable.length > 0 && <ActionFeedback tone="error" className="overview-degraded">Some workspace data is unavailable: {unavailable.join(", ")}. Healthy panels remain usable; refresh to retry.</ActionFeedback>}
       {!workspaceId ? (
         <section className="live-panel">
           <header>
@@ -304,7 +310,7 @@ async function OrganisationsPage({
               </span>
             </div>
           </header>
-          <form action={createOrganisationAction} className="portal-form">
+          <PortalActionForm action={createOrganisationAction} className="portal-form" submitLabel="Create organisation" pendingLabel="Creating…">
             <label>
               Name
               <input name="name" required minLength={2} maxLength={100} />
@@ -318,8 +324,7 @@ async function OrganisationsPage({
                 maxLength={63}
               />
             </label>
-            <SubmitButton pendingLabel="Creating…">Create organisation</SubmitButton>
-          </form>
+          </PortalActionForm>
         </section>
       ) : (
         <>
@@ -334,10 +339,6 @@ async function OrganisationsPage({
                 <Link href={`/usage?workspaceId=${workspaceId}`}>Usage <ArrowRight /></Link>
               </nav>
             </header>
-            <form method="get" className="workspace-picker">
-              <label><span>Workspace</span><select name="workspaceId" defaultValue={workspaceId}>{organisations.flatMap((org) => org.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{org.name} / {workspace.name} · {workspace.role}</option>))}</select></label>
-              <button className="portal-secondary">Switch workspace</button>
-            </form>
             <section className="workspace-metrics" aria-label="Workspace summary">
               <Metric icon={<Users />} label="Members" value={members.length} />
               <Metric icon={<Server />} label="Runners" value={runners.length} />
@@ -370,8 +371,7 @@ async function OrganisationsPage({
               ))}
               {!members.length && <EmptyRow text="No members were returned." />}
             </div>
-            <form action={inviteMemberAction} className="portal-form compact">
-              <input type="hidden" name="workspaceId" value={workspaceId} />
+            <PortalActionForm action={inviteMemberAction} hidden={{ workspaceId }} className="portal-form compact" submitLabel="Invite member" pendingLabel="Sending…">
               <label>
                 Email
                 <input type="email" name="email" required />
@@ -385,8 +385,7 @@ async function OrganisationsPage({
                   <option>administrator</option>
                 </select>
               </label>
-              <SubmitButton pendingLabel="Sending…">Invite member</SubmitButton>
-            </form>
+            </PortalActionForm>
           </section>
           <section className="live-panel">
             <header>
@@ -411,50 +410,23 @@ async function OrganisationsPage({
                     </small>
                   </div>
                   {approval.status === "pending" && (
-                    <form action={decideApprovalAction}>
-                      <input
-                        type="hidden"
-                        name="workspaceId"
-                        value={workspaceId}
-                      />
-                      <input
-                        type="hidden"
-                        name="approvalId"
-                        value={approval.approvalId}
-                      />
+                    <>
+                    <PortalActionForm action={decideApprovalAction} hidden={{ workspaceId, approvalId: approval.approvalId, decision: "approved" }} submitLabel="Approve" pendingLabel="Saving…">
                       <input name="reason" placeholder="Review note" />
-                      <button name="decision" value="approved">
-                        Approve
-                      </button>
-                      <button name="decision" value="rejected">
-                        Reject
-                      </button>
-                    </form>
+                    </PortalActionForm>
+                    <PortalActionForm action={decideApprovalAction} hidden={{ workspaceId, approvalId: approval.approvalId, decision: "rejected" }} submitLabel="Reject" pendingLabel="Saving…" dangerous confirmTitle="Reject this revision?" confirmDescription="Add a review note explaining what must change before it can be resubmitted.">
+                      <input name="reason" placeholder="Required rejection reason" required />
+                    </PortalActionForm>
+                    </>
                   )}
                   {approval.status === "approved" && (
-                    <form action={publishWorkflowAction}>
-                      <input
-                        type="hidden"
-                        name="workspaceId"
-                        value={workspaceId}
-                      />
-                      <input
-                        type="hidden"
-                        name="workflowId"
-                        value={approval.workflowId}
-                      />
-                      <input
-                        type="hidden"
-                        name="revisionId"
-                        value={approval.revisionId}
-                      />
+                    <PortalActionForm action={publishWorkflowAction} hidden={{ workspaceId, workflowId: approval.workflowId, revisionId: approval.revisionId }} submitLabel="Publish" pendingLabel="Publishing…" confirmTitle="Publish this revision?" confirmDescription="This makes the approved revision current for the workspace.">
                       <input
                         name="changeSummary"
                         placeholder="Change summary"
                         required
                       />
-                      <button>Publish</button>
-                    </form>
+                    </PortalActionForm>
                   )}
                   <span className={`status-pill ${approval.status}`}>
                     {approval.status}
@@ -685,21 +657,7 @@ async function OrganisationsPage({
                               : `expires ${new Date(token.expiresAt).toLocaleDateString("en-GB")}`}
                           </small>
                         </div>
-                        {!token.revokedAt && (
-                          <form action={revokeScimTokenAction}>
-                            <input
-                              type="hidden"
-                              name="organisationId"
-                              value={organisation.id}
-                            />
-                            <input
-                              type="hidden"
-                              name="tokenId"
-                              value={token.id}
-                            />
-                            <button>Revoke</button>
-                          </form>
-                        )}
+                        {!token.revokedAt && <PortalActionForm action={revokeScimTokenAction} hidden={{ organisationId: organisation.id, tokenId: token.id }} submitLabel="Revoke" pendingLabel="Revokingâ€¦" dangerous confirmTitle={`Revoke ${token.name}?`} confirmDescription="Automated provisioning clients using this credential will lose access immediately." />}
                       </article>
                     ))}
                     {!scim.length && <EmptyRow text="No SCIM credentials." />}
@@ -790,13 +748,8 @@ async function UsagePage({
         title="Usage"
         description="Verified hosted infrastructure usage, separate from unmetered local execution."
       />
+      {workspace && !usage && <ActionFeedback tone="error" className="overview-degraded">Usage reporting is temporarily unavailable. Workspace controls are unaffected; refresh to retry.</ActionFeedback>}
       {workspace ? <>
-        <section className="workspace-switcher usage-switcher">
-          <form method="get">
-            <label>Workspace<select name="workspaceId" defaultValue={workspace.id}>{organisations.flatMap((organisation) => organisation.workspaces.map((item) => <option key={item.id} value={item.id}>{organisation.name} / {item.name}</option>))}</select></label>
-            <button className="portal-secondary">Switch workspace</button>
-          </form>
-        </section>
         <section className="operations-grid usage-totals">
           <Metric icon={<Cloud />} label="Hosted runner" value={formatDuration(meterQuantity(usage,"hosted_runner_seconds"))} />
           <Metric icon={<MonitorSmartphone />} label="Managed browser" value={formatDuration(meterQuantity(usage,"managed_browser_seconds"))} />
@@ -965,6 +918,7 @@ async function SupportPage({
   const organisations = (await api.listAccountOrganisations()).data.items,
     workspace = selectWorkspace(organisations, query.workspaceId);
   let requests: Array<Record<string, unknown>> = [];
+  let requestsUnavailable = false;
   if (workspace)
     try {
       requests = (
@@ -972,13 +926,14 @@ async function SupportPage({
           path: `/v1/workspaces/${workspace.id}/support-access-requests`,
         })
       ).data.items;
-    } catch {}
+    } catch { requestsUnavailable = true; }
   return (
     <main className="portal-page">
       <PageHead
         title="Support access"
         description="Temporary diagnostic access is explicit, scoped, auditable and revocable."
       />
+      {requestsUnavailable && <ActionFeedback tone="error" className="overview-degraded">Support access requests could not be loaded. Refresh to retry before approving or revoking access.</ActionFeedback>}
       <section className="live-panel">
         <header>
           <div>
@@ -1205,23 +1160,7 @@ function DeploymentPanel({
                   {String(deployment.environment)} · {status}
                 </small>
               </div>
-              {nextStatus && (
-                <form action={transitionDeploymentAction}>
-                  <input type="hidden" name="workspaceId" value={workspaceId} />
-                  <input
-                    type="hidden"
-                    name="deploymentId"
-                    value={deploymentId}
-                  />
-                  <input type="hidden" name="status" value={nextStatus} />
-                  <input
-                    type="hidden"
-                    name="reason"
-                    value={`${nextStatus === "paused" ? "Paused" : "Resumed"} from the account portal`}
-                  />
-                  <button>{nextStatus === "paused" ? "Pause" : "Resume"}</button>
-                </form>
-              )}
+              {nextStatus && <PortalActionForm action={transitionDeploymentAction} hidden={{ workspaceId, deploymentId, status: nextStatus, reason: `${nextStatus === "paused" ? "Paused" : "Resumed"} from the account portal` }} submitLabel={nextStatus === "paused" ? "Pause" : "Resume"} pendingLabel="Updatingâ€¦" confirmTitle={`${nextStatus === "paused" ? "Pause" : "Resume"} this deployment?`} confirmDescription={nextStatus === "paused" ? "New hosted executions will stop until the deployment is resumed." : "Hosted executions can start again as soon as the deployment is active."} />}
             </article>
           );
         })}
@@ -1244,10 +1183,7 @@ function SessionRow({ session }: { session: AccountSession }) {
         </small>
       </div>
       {session.current ? <span className="status-pill approved">Current</span> : (
-        <form action={revokeSessionAction}>
-          <input type="hidden" name="sessionId" value={session.id} />
-          <button>Revoke</button>
-        </form>
+        <PortalActionForm action={revokeSessionAction} hidden={{ sessionId: session.id }} submitLabel="Revoke" pendingLabel="Revoking…" dangerous confirmTitle={`Sign out ${session.deviceName}?`} confirmDescription="This device will need to sign in again." />
       )}
     </article>
   );
@@ -1263,7 +1199,7 @@ function TokenRow({ token }: { token: TokenSummary }) {
           {new Date(token.expiresAt).toLocaleDateString("en-GB")}
         </small>
       </div>
-      {token.revokedAt ? <span className="status-pill">Revoked</span> : <form action={revokePersonalTokenAction}><input type="hidden" name="tokenId" value={token.id} /><button>Revoke</button></form>}
+      {token.revokedAt ? <span className="status-pill">Revoked</span> : <PortalActionForm action={revokePersonalTokenAction} hidden={{ tokenId: token.id }} submitLabel="Revoke" pendingLabel="Revoking…" dangerous confirmTitle={`Revoke ${token.name}?`} confirmDescription="Clients using this API key will lose access immediately." />}
     </article>
   );
 }

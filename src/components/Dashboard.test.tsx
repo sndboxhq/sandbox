@@ -178,4 +178,16 @@ describe("Dashboard interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await waitFor(() => expect(localStorage.getItem(DASHBOARD_SAVED_VIEWS_KEY)).toContain("Daily work"));
   });
+
+  it("keeps bulk selection contextual and confirms the exact archive count", async () => {
+    const archive = vi.spyOn(api, "archiveWorkflows").mockResolvedValue();
+    render(<ToastProvider><Dashboard /></ToastProvider>);
+    await screen.findByText("Daily report");
+    fireEvent.click(screen.getByLabelText("Select Daily report"));
+    expect(screen.getByRole("toolbar", { name: "Selected workflow actions" })).toHaveTextContent("1 selected");
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Archive 1 workflow?");
+    fireEvent.click(screen.getByRole("button", { name: "Archive workflows" }));
+    await waitFor(() => expect(archive).toHaveBeenCalledWith(["workflow-one"]));
+  });
 });

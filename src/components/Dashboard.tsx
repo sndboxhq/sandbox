@@ -1,6 +1,7 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { CustomSelect } from "./ui/CustomSelect";
 import {
+  AlertTriangle,
   Archive,
   ArrowRight,
   Bookmark,
@@ -21,12 +22,14 @@ import {
   RotateCcw,
   Search,
   Star,
+  Tags as TagsIcon,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
+import { rankAttentionItems } from "@sandbox/product-ui";
 import { api } from "../api";
 import { definitionFor } from "../catalogue";
 import { usePreferences } from "../preferences";
@@ -43,6 +46,7 @@ import { Status } from "./Status";
 import { ConfirmDialog, Dialog } from "./ui/Dialog";
 import { EmptyState, ErrorState, LoadingSkeleton } from "./ui/States";
 import { useToast } from "./ui/Toast";
+import { DesktopGettingStarted } from "./DesktopGettingStarted";
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "../workspaceState";
 import { isTextEntryTarget } from "../useKeyboardShortcuts";
 import {
@@ -72,7 +76,7 @@ const templateIcons = {
 } satisfies Record<WorkflowTemplateCategory, typeof Bot>;
 
 export function Dashboard() {
-  const { openWorkflow, createWorkflow } = useAppStore();
+  const { openWorkflow, createWorkflow, selectExecution, setView } = useAppStore();
   const dateDisplay = usePreferences((state) => state.dateDisplay);
   const toast = useToast();
   const [items, setItems] = useState<WorkflowSummary[]>([]);
@@ -108,6 +112,14 @@ export function Dashboard() {
   const [organize, setOrganize] = useState<WorkflowSummary>();
   const [organizeFolder, setOrganizeFolder] = useState("");
   const [tags, setTags] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkDialog, setBulkDialog] = useState<"folder" | "tags">();
+  const [bulkFolder, setBulkFolder] = useState("");
+  const [bulkTags, setBulkTags] = useState("");
+  const [bulkTagMode, setBulkTagMode] = useState<"add" | "remove">("add");
+  const [bulkConfirm, setBulkConfirm] = useState<"archive" | "restore">();
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [accountConnected, setAccountConnected] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const currentViewState = (): DashboardSavedViewState => ({ search, workflowFilter: filter, folder, sortOrder: sort as DashboardSavedViewState["sortOrder"] });
   const persistSavedViews = (next: DashboardSavedView[]) => {
@@ -139,6 +151,7 @@ export function Dashboard() {
   };
   useEffect(() => {
     void load();
+    void api.accountStatus().then((status) => setAccountConnected(status.signedIn)).catch(() => undefined);
     const create = () => {
       setTemplate(BLANK_WORKFLOW_TEMPLATE);
       setName(BLANK_WORKFLOW_TEMPLATE.name);
@@ -147,6 +160,13 @@ export function Dashboard() {
     window.addEventListener("sandbox:create-workflow", create);
     return () => window.removeEventListener("sandbox:create-workflow", create);
   }, []);
+  useEffect(() => {
+    const known = new Set(items.map((item) => item.workflow.id));
+    setSelectedIds((current) => {
+      const next = new Set([...current].filter((id) => known.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [items]);
   useEffect(() => {
     updateWorkspaceSnapshot(current => ({ ...current, dashboard: { activeTab: tab, search, workflowFilter: filter, folder, sortOrder: sort, templateCategory } }));
   }, [tab, search, filter, folder, sort, templateCategory]);
@@ -236,6 +256,23 @@ export function Dashboard() {
             .includes(needle)),
     );
   }, [search, templateCategory]);
+  const attentionItems = useMemo(
+    () =>
+      rankAttentionItems(
+        items
+          .filter((item) => item.lastExecution?.status === "failed")
+          .map((item) => ({
+            id: item.lastExecution!.id,
+            severity: "blocking" as const,
+            title: `${item.workflow.name} failed`,
+            description:
+              item.lastExecution!.error?.message ??
+              "Open the failed run to inspect the exact step and retry it.",
+            actionLabel: "Review failed run",
+          })),
+      ),
+    [items],
+  );
   const openCreate = (item: WorkflowTemplate = BLANK_WORKFLOW_TEMPLATE) => {
     setTemplate(item);
     setName(item.name);
@@ -290,6 +327,56 @@ export function Dashboard() {
     } catch (value) {
       toast.push(String(value), "error");
       return false;
+    }
+  };
+  const runBulkMetadata = async (
+    patch: Parameters<typeof api.batchUpdateWorkflowMetadata>[1],
+    success: string,
+  ) => {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    setBulkBusy(true);
+    try {
+      await api.batchUpdateWorkflowMetadata(ids, patch);
+      await load();
+      setSelectedIds(new Set());
+      setBulkDialog(undefined);
+      toast.push(success, "success");
+    } catch (value) {
+      toast.push(String(value), "error");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+  const confirmBulkArchive = async () => {
+    const ids = [...selectedIds];
+    if (!ids.length || !bulkConfirm) return;
+    const action = bulkConfirm;
+    setBulkBusy(true);
+    try {
+      if (action === "archive") await api.archiveWorkflows(ids);
+      else await api.restoreWorkflows(ids);
+      await load();
+      setSelectedIds(new Set());
+      setBulkConfirm(undefined);
+      toast.push(
+        `${ids.length} workflow${ids.length === 1 ? "" : "s"} ${action === "archive" ? "archived" : "restored"}.`,
+        "success",
+        action === "archive"
+          ? {
+              label: "Undo",
+              onAction: () =>
+                void api
+                  .restoreWorkflows(ids)
+                  .then(load)
+                  .catch((value) => toast.push(String(value), "error")),
+            }
+          : undefined,
+      );
+    } catch (value) {
+      toast.push(String(value), "error");
+    } finally {
+      setBulkBusy(false);
     }
   };
   const actConfirm = async () => {
@@ -360,6 +447,9 @@ export function Dashboard() {
     tab === "templates"
       ? Boolean(search || templateCategory !== "all")
       : Boolean(search || filter !== "all" || folder);
+  const selectedItems = items.filter((item) => selectedIds.has(item.workflow.id));
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every((item) => selectedIds.has(item.workflow.id));
   const validSavedViewName = validateSavedViewName(savedViewName, savedViews);
   const validRename = renamingViewId ? validateSavedViewName(renameValue, savedViews, renamingViewId) : undefined;
   const describeSavedView = (savedView: DashboardSavedView) => [
@@ -418,6 +508,74 @@ export function Dashboard() {
           <span>{WORKFLOW_TEMPLATES.length}</span>
         </button>
       </div>
+      {tab === "workflows" && !loading && (
+        <DesktopGettingStarted
+          steps={[
+            {
+              id: "create",
+              label: "Create or import a workflow",
+              complete: items.length > 0,
+              actionLabel: items.length ? "View workflows" : "Create workflow",
+              onAction: () => items.length ? searchRef.current?.focus() : openCreate(),
+            },
+            {
+              id: "configure",
+              label: "Configure its steps and permissions",
+              complete: items.some((item) => item.workflow.nodes.length > 1),
+              actionLabel: "Open workflow",
+              onAction: () => items[0] ? void openWorkflow(items[0].workflow.id) : openCreate(),
+            },
+            {
+              id: "test",
+              label: "Test it on this device",
+              complete: items.some((item) => Boolean(item.lastExecution)),
+              actionLabel: "Start a test run",
+              onAction: () => items[0] ? void run(items[0].workflow.id) : openCreate(),
+            },
+            {
+              id: "complete",
+              label: "Complete a successful run",
+              complete: items.some((item) => item.lastExecution?.status === "successful"),
+              actionLabel: "Review activity",
+              onAction: () => setView("history"),
+            },
+            {
+              id: "account",
+              label: "Connect an account (optional)",
+              complete: accountConnected,
+              actionLabel: "Open Cloud",
+              optional: true,
+              onAction: () => setView("cloud"),
+            },
+          ]}
+        />
+      )}
+      {tab === "workflows" && attentionItems.length > 0 && (
+        <section className="desktop-attention" aria-labelledby="desktop-attention-title">
+          <header>
+            <div>
+              <span className="attention-icon"><AlertTriangle size={16} /></span>
+              <div><h2 id="desktop-attention-title">Needs attention</h2><p>Resolve failed runs without losing their execution context.</p></div>
+            </div>
+            <span>{attentionItems.length}</span>
+          </header>
+          <div className="desktop-attention-list">
+            {attentionItems.slice(0, 3).map((attention) => {
+              const summary = items.find((item) => item.lastExecution?.id === attention.id);
+              return (
+                <article key={attention.id}>
+                  <div><strong>{attention.title}</strong><small>{attention.description}</small></div>
+                  <button className="button" onClick={() => {
+                    if (!summary?.lastExecution) return;
+                    selectExecution(summary.lastExecution);
+                    setView("history");
+                  }}>{attention.actionLabel}</button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <div className="toolbar dashboard-toolbar">
         <div className="search">
           <Search size={15} />
@@ -537,6 +695,21 @@ export function Dashboard() {
           )}
         </span>
       </div>
+      {tab === "workflows" && selectedItems.length > 0 && (
+        <div className="bulk-toolbar" role="toolbar" aria-label="Selected workflow actions">
+          <strong>{selectedItems.length} selected</strong>
+          <button className="button" disabled={bulkBusy} onClick={() => void runBulkMetadata({ favorite: true }, `${selectedItems.length} workflow${selectedItems.length === 1 ? "" : "s"} favorited.`)}><Star size={13} /> Favorite</button>
+          <button className="button" disabled={bulkBusy} onClick={() => void runBulkMetadata({ favorite: false }, `${selectedItems.length} workflow${selectedItems.length === 1 ? "" : "s"} unfavorited.`)}>Unfavorite</button>
+          <button className="button" disabled={bulkBusy} onClick={() => { setBulkFolder(""); setBulkConfirm(undefined); setBulkDialog("folder"); }}><Folder size={13} /> Move</button>
+          <button className="button" disabled={bulkBusy} onClick={() => { setBulkTags(""); setBulkDialog("tags"); }}><TagsIcon size={13} /> Tags</button>
+          {selectedItems.every((item) => Boolean(item.metadata.archivedAt)) ? (
+            <button className="button" disabled={bulkBusy} onClick={() => setBulkConfirm("restore")}><RotateCcw size={13} /> Restore</button>
+          ) : (
+            <button className="button danger-text" disabled={bulkBusy} onClick={() => setBulkConfirm("archive")}><Archive size={13} /> Archive</button>
+          )}
+          <button className="icon-button bulk-clear" aria-label="Clear workflow selection" onClick={() => setSelectedIds(new Set())}><X size={14} /></button>
+        </div>
+      )}
       {tab === "templates" ? (
         filteredTemplates.length ? (
           <section className="workflow-template-grid" aria-label="Workflow templates">
@@ -615,7 +788,23 @@ export function Dashboard() {
           ) : (
             <section className="workflow-table" aria-label="Workflows">
               <div className="table-head">
-                <span>Name</span>
+                <span className="bulk-name-header">
+                  <input
+                    type="checkbox"
+                    aria-label={allVisibleSelected ? "Deselect visible workflows" : "Select visible workflows"}
+                    checked={allVisibleSelected}
+                    onChange={(event) => {
+                      const visible = new Set(filtered.map((item) => item.workflow.id));
+                      setSelectedIds((current) => {
+                        const next = new Set(current);
+                        if (event.target.checked) visible.forEach((id) => next.add(id));
+                        else visible.forEach((id) => next.delete(id));
+                        return next;
+                      });
+                    }}
+                  />
+                  Name
+                </span>
                 <span>Trigger</span>
                 <span>Last run</span>
                 <span>Next run</span>
@@ -627,6 +816,13 @@ export function Dashboard() {
                   item={item}
                   dateDisplay={dateDisplay}
                   running={running === item.workflow.id}
+                  selected={selectedIds.has(item.workflow.id)}
+                  onSelect={(selected) => setSelectedIds((current) => {
+                    const next = new Set(current);
+                    if (selected) next.add(item.workflow.id);
+                    else next.delete(item.workflow.id);
+                    return next;
+                  })}
                   onOpen={() => void openWorkflow(item.workflow.id)}
                   onRun={() => void run(item.workflow.id)}
                   onFavorite={() =>
@@ -795,6 +991,60 @@ export function Dashboard() {
           />
         </label>
       </Dialog>
+      <Dialog
+        open={bulkDialog === "folder"}
+        onOpenChange={(open) => !open && setBulkDialog(undefined)}
+        title={`Move ${selectedItems.length} workflow${selectedItems.length === 1 ? "" : "s"}`}
+        description="Set one local folder for every selected workflow. Leave it empty to remove the folder."
+        footer={
+          <>
+            <button className="button" disabled={bulkBusy} onClick={() => setBulkDialog(undefined)}>Cancel</button>
+            <button className="button primary" disabled={bulkBusy} onClick={() => void runBulkMetadata({ folder: bulkFolder.trim() || null }, `${selectedItems.length} workflow${selectedItems.length === 1 ? "" : "s"} moved.`)}>{bulkBusy ? "Moving…" : "Move workflows"}</button>
+          </>
+        }
+      >
+        <label className="field">
+          <span>Folder</span>
+          <input autoFocus value={bulkFolder} maxLength={64} onChange={(event) => setBulkFolder(event.target.value)} />
+        </label>
+      </Dialog>
+      <Dialog
+        open={bulkDialog === "tags"}
+        onOpenChange={(open) => !open && setBulkDialog(undefined)}
+        title={`Update tags on ${selectedItems.length} workflow${selectedItems.length === 1 ? "" : "s"}`}
+        description="Add or remove the listed tags while keeping every workflow's other tags intact."
+        footer={
+          <>
+            <button className="button" disabled={bulkBusy} onClick={() => setBulkDialog(undefined)}>Cancel</button>
+            <button className="button primary" disabled={bulkBusy || !bulkTags.trim()} onClick={() => {
+              const values = bulkTags.split(",").map((value) => value.trim()).filter(Boolean);
+              void runBulkMetadata(bulkTagMode === "add" ? { addTags: values } : { removeTags: values }, `${bulkTagMode === "add" ? "Added tags to" : "Removed tags from"} ${selectedItems.length} workflow${selectedItems.length === 1 ? "" : "s"}.`);
+            }}>{bulkBusy ? "Saving…" : "Update tags"}</button>
+          </>
+        }
+      >
+        <label className="field">
+          <span>Action</span>
+          <CustomSelect aria-label="Tag action" value={bulkTagMode} onChange={(event) => setBulkTagMode(event.target.value as "add" | "remove")}>
+            <option value="add">Add tags</option>
+            <option value="remove">Remove tags</option>
+          </CustomSelect>
+        </label>
+        <label className="field">
+          <span>Tags <small>Comma separated</small></span>
+          <input autoFocus value={bulkTags} onChange={(event) => setBulkTags(event.target.value)} />
+        </label>
+      </Dialog>
+      <ConfirmDialog
+        open={Boolean(bulkConfirm)}
+        onOpenChange={(open) => !open && setBulkConfirm(undefined)}
+        title={bulkConfirm === "restore" ? `Restore ${selectedItems.length} workflow${selectedItems.length === 1 ? "" : "s"}?` : `Archive ${selectedItems.length} workflow${selectedItems.length === 1 ? "" : "s"}?`}
+        description={bulkConfirm === "restore" ? `The ${selectedItems.length} selected workflows will return to the main list and remain disabled.` : `The ${selectedItems.length} selected workflows will move to Archived. Any active schedules will be disabled atomically.`}
+        confirmLabel={bulkConfirm === "restore" ? "Restore workflows" : "Archive workflows"}
+        dangerous={bulkConfirm !== "restore"}
+        busy={bulkBusy}
+        onConfirm={() => void confirmBulkArchive()}
+      />
       <ConfirmDialog
         open={Boolean(confirm)}
         onOpenChange={(open) => !open && setConfirm(undefined)}
@@ -824,6 +1074,8 @@ function WorkflowRow({
   item,
   dateDisplay,
   running,
+  selected,
+  onSelect,
   onOpen,
   onRun,
   onFavorite,
@@ -837,6 +1089,8 @@ function WorkflowRow({
   item: WorkflowSummary;
   dateDisplay: "relative" | "absolute";
   running: boolean;
+  selected: boolean;
+  onSelect: (selected: boolean) => void;
   onOpen: () => void;
   onRun: () => void;
   onFavorite: () => void;
@@ -855,7 +1109,7 @@ function WorkflowRow({
   const stop = (event: React.SyntheticEvent) => event.stopPropagation();
   return (
     <div
-      className="workflow-row"
+      className={`workflow-row ${selected ? "selected" : ""}`}
       tabIndex={0}
       role="link"
       onClick={onOpen}
@@ -864,6 +1118,14 @@ function WorkflowRow({
       }}
     >
       <div className="workflow-name">
+        <input
+          className="workflow-select"
+          type="checkbox"
+          aria-label={`Select ${workflow.name}`}
+          checked={selected}
+          onClick={stop}
+          onChange={(event) => onSelect(event.target.checked)}
+        />
         <button
           className={`favorite ${metadata.favorite ? "active" : ""}`}
           aria-label={`${metadata.favorite ? "Remove" : "Add"} ${workflow.name} ${metadata.favorite ? "from" : "to"} favorites`}
@@ -877,7 +1139,7 @@ function WorkflowRow({
         <span className={`enable-dot ${workflow.enabled ? "enabled" : ""}`} />
         <div>
           <b>{workflow.name}</b>
-          <small>
+          <small title={`Updated ${new Date(workflow.updatedAt).toLocaleString()}`}>
             {workflow.description ||
               `${workflow.nodes.length} ${workflow.nodes.length === 1 ? "node" : "nodes"} · Updated ${formatDate(workflow.updatedAt, dateDisplay)}`}
             {metadata.folder ? ` · ${metadata.folder}` : ""}
@@ -892,13 +1154,18 @@ function WorkflowRow({
         {lastExecution ? (
           <>
             <Status status={lastExecution.status} />
-            <small>{formatDate(lastExecution.startedAt, dateDisplay)}</small>
+            <small title={new Date(lastExecution.startedAt).toLocaleString()}>
+              {formatDate(lastExecution.startedAt, dateDisplay)}
+            </small>
           </>
         ) : (
           <span className="muted">Never run</span>
         )}
       </div>
-      <div className="muted-cell">
+      <div
+        className="muted-cell"
+        title={nextRunAt ? new Date(nextRunAt).toLocaleString() : undefined}
+      >
         {nextRunAt ? (
           <>
             <Clock3 size={14} />

@@ -1,7 +1,8 @@
 "use client";
 
 import { AlertTriangle, KeyRound, LogOut, Trash2 } from "lucide-react";
-import { useActionState, useState } from "react";
+import { ProductDialog } from "@sandbox/product-ui";
+import { useActionState, useEffect, useState } from "react";
 import {
   deleteAccountAction,
   revokeAllPersonalTokensAction,
@@ -15,6 +16,7 @@ const initialMaintenanceState: AccountMaintenanceState = { error: null, message:
 
 export function AccountDangerZone() {
   const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState<"sessions" | "tokens">();
   const [state, action, pending] = useActionState(deleteAccountAction, initialState);
   const [sessionState, revokeSessions, sessionsPending] = useActionState(
     revokeOtherSessionsAction,
@@ -24,6 +26,8 @@ export function AccountDangerZone() {
     revokeAllPersonalTokensAction,
     initialMaintenanceState,
   );
+  useEffect(() => { if (sessionState.message) setConfirming(undefined); }, [sessionState.message]);
+  useEffect(() => { if (tokenState.message) setConfirming(undefined); }, [tokenState.message]);
 
   return (
     <section className="danger-zone">
@@ -39,9 +43,7 @@ export function AccountDangerZone() {
             <p>Revoke every account session except the browser you are using now.</p>
             <DangerFeedback state={sessionState} />
           </div>
-          <form action={revokeSessions}>
-            <button className="danger-secondary-button" disabled={sessionsPending}>{sessionsPending ? "Signing out…" : "Sign out others"}</button>
-          </form>
+          <button type="button" className="danger-secondary-button" disabled={sessionsPending} onClick={() => setConfirming("sessions")}>Sign out others</button>
         </article>
         <article>
           <span className="danger-action-icon"><KeyRound aria-hidden="true" /></span>
@@ -50,9 +52,7 @@ export function AccountDangerZone() {
             <p>Immediately stop every active personal API key from accessing your account.</p>
             <DangerFeedback state={tokenState} />
           </div>
-          <form action={revokeTokens}>
-            <button className="danger-secondary-button" disabled={tokensPending}>{tokensPending ? "Revoking…" : "Revoke all keys"}</button>
-          </form>
+          <button type="button" className="danger-secondary-button" disabled={tokensPending} onClick={() => setConfirming("tokens")}>Revoke all keys</button>
         </article>
         <article className="danger-critical-action">
           <span className="danger-action-icon"><Trash2 aria-hidden="true" /></span>
@@ -71,6 +71,12 @@ export function AccountDangerZone() {
           )}
         </article>
       </div>
+      <ProductDialog open={confirming === "sessions"} title="Sign out every other device?" description="Every account session except this browser will be revoked immediately." onClose={() => { if (!sessionsPending) setConfirming(undefined); }} dangerous>
+        <form action={revokeSessions} className="danger-confirm-form"><DangerFeedback state={sessionState} /><div><button type="button" onClick={() => setConfirming(undefined)} disabled={sessionsPending}>Cancel</button><button className="danger-button" disabled={sessionsPending}>{sessionsPending ? "Signing out…" : "Sign out other devices"}</button></div></form>
+      </ProductDialog>
+      <ProductDialog open={confirming === "tokens"} title="Revoke every API key?" description="All clients using personal API keys will lose access immediately." onClose={() => { if (!tokensPending) setConfirming(undefined); }} dangerous>
+        <form action={revokeTokens} className="danger-confirm-form"><DangerFeedback state={tokenState} /><div><button type="button" onClick={() => setConfirming(undefined)} disabled={tokensPending}>Cancel</button><button className="danger-button" disabled={tokensPending}>{tokensPending ? "Revoking…" : "Revoke all API keys"}</button></div></form>
+      </ProductDialog>
     </section>
   );
 }

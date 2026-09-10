@@ -782,11 +782,14 @@ export const previewApi = {
       patch.folder === null
         ? undefined
         : (patch.folder?.trim() ?? current.folder);
-    const tags =
-      patch.tags?.map((tag) => tag.trim()).filter(Boolean) ?? current.tags;
+    let tags = patch.tags?.map((tag) => tag.trim()).filter(Boolean) ?? current.tags;
+    for (const tag of patch.addTags?.map((value) => value.trim()).filter(Boolean) ?? []) if (!tags.some((current) => current.toLowerCase() === tag.toLowerCase())) tags.push(tag);
+    const removedTags = new Set(patch.removeTags?.map((value) => value.trim().toLowerCase()) ?? []);
+    tags = tags.filter((tag) => !removedTags.has(tag.toLowerCase()));
+    const { addTags: _addTags, removeTags: _removeTags, ...plainPatch } = patch;
     meta[id] = {
       ...current,
-      ...patch,
+      ...plainPatch,
       folder,
       tags,
       archivedAt:
@@ -802,6 +805,15 @@ export const previewApi = {
     return (await this.listWorkflows(true)).find(
       (item) => item.workflow.id === id,
     )!;
+  },
+  async batchUpdateWorkflowMetadata(ids: string[], patch: WorkflowMetadataPatch) {
+    const existing = new Set(workflows().map((workflow) => workflow.id));
+    if (!ids.length) throw new Error("Choose at least one workflow.");
+    if (ids.length > 500) throw new Error("Bulk actions are limited to 500 workflows.");
+    if (ids.some((id) => !existing.has(id))) throw new Error("A selected workflow no longer exists.");
+    if (patch.folder != null && patch.folder.trim().length > 64) throw new Error("Folder names are limited to 64 characters.");
+    if (patch.tags && (patch.tags.length > 10 || patch.tags.some((tag) => tag.trim().length > 32))) throw new Error("Use at most 10 tags, each no longer than 32 characters.");
+    for (const id of [...new Set(ids)]) await this.updateWorkflowMetadata(id, patch);
   },
   async duplicateWorkflow(id: string, name?: string) {
     const source = workflows().find((item) => item.id === id);
@@ -838,6 +850,11 @@ export const previewApi = {
     }
     await this.updateWorkflowMetadata(id, { archivedAt: now() });
   },
+  async archiveWorkflows(ids: string[]) {
+    const existing = new Set(workflows().map((workflow) => workflow.id));
+    if (!ids.length || ids.some((id) => !existing.has(id))) throw new Error("A selected workflow no longer exists.");
+    for (const id of [...new Set(ids)]) await this.archiveWorkflow(id);
+  },
   async restoreWorkflow(id: string) {
     const workflow = workflows().find((item) => item.id === id);
     if (workflow?.enabled) {
@@ -845,6 +862,11 @@ export const previewApi = {
       await this.saveWorkflow(workflow);
     }
     await this.updateWorkflowMetadata(id, { archivedAt: null });
+  },
+  async restoreWorkflows(ids: string[]) {
+    const existing = new Set(workflows().map((workflow) => workflow.id));
+    if (!ids.length || ids.some((id) => !existing.has(id))) throw new Error("A selected workflow no longer exists.");
+    for (const id of [...new Set(ids)]) await this.restoreWorkflow(id);
   },
   async purgeWorkflow(id: string) {
     const item = (await this.listWorkflows(true)).find(

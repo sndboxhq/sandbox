@@ -502,6 +502,16 @@ export const runSummarySchema = z.object({
 });
 export type RunSummary = z.infer<typeof runSummarySchema>;
 
+export const workspaceActivitySummarySchema = z.object({
+  generatedAt: z.string().datetime(),
+  runners: z.array(runnerRecordSchema),
+  runs: z.array(runSummarySchema),
+  pendingApprovalCount: z.number().int().nonnegative(),
+  webhookFailureCount: z.number().int().nonnegative(),
+  syncConflictCount: z.number().int().nonnegative()
+}).strict();
+export type WorkspaceActivitySummary = z.infer<typeof workspaceActivitySummarySchema>;
+
 export const executionStateSchema = z.enum([
   "queued",
   "waiting_for_runner",

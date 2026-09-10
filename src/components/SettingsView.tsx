@@ -112,6 +112,15 @@ export function SettingsView() {
         ?.focus(),
     );
   };
+  useEffect(() => {
+    const selectSection = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (settingsSections.some((item) => item.id === id))
+        focusSection(id as SettingsSectionId);
+    };
+    window.addEventListener("sandbox:settings-section", selectSection);
+    return () => window.removeEventListener("sandbox:settings-section", selectSection);
+  }, []);
 
   const load = async () => {
     try {

@@ -1,3 +1,6 @@
+import type { WorkspaceActivitySummary } from "@sandbox/contracts";
+export type { WorkspaceActivitySummary } from "@sandbox/contracts";
+
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type QueryValue = string | number | boolean | null | undefined;
 
@@ -336,7 +339,7 @@ export class SandboxApiClient {
     return this.request({path:`/v1/workspaces/${encodeURIComponent(workspaceId)}/audit`,query:{limit},parse});
   }
 
-  getWorkspaceActivity<T = {runners:unknown[];runs:unknown[];pendingApprovalCount:number;webhookFailureCount:number}>(workspaceId:string,limit=30,parse?: (value:unknown)=>T):Promise<ApiResult<T>> {
+  getWorkspaceActivity<T = WorkspaceActivitySummary>(workspaceId:string,limit=30,parse?: (value:unknown)=>T):Promise<ApiResult<T>> {
     return this.request({path:`/v1/workspaces/${encodeURIComponent(workspaceId)}/activity`,query:{limit},parse});
   }
 

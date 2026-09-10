@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import {
+  Activity,
   Building2,
   CheckCircle2,
   Cloud,
@@ -11,7 +12,11 @@ import {
   RefreshCcw,
   ShieldCheck,
   TriangleAlert,
+  ExternalLink,
 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import type { WorkspaceActivitySummary } from "@sandbox/contracts";
+import { StatusBadge } from "@sandbox/product-ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useAppStore } from "../store";
@@ -46,6 +51,8 @@ export function CloudView() {
   );
   const [cloudWorkflows, setCloudWorkflows] = useState<CloudWorkflow[]>([]);
   const [approvals, setApprovals] = useState<CloudWorkflowApproval[]>([]);
+  const [activity, setActivity] = useState<WorkspaceActivitySummary>();
+  const [activityStale, setActivityStale] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({});
   const [organisationName, setOrganisationName] = useState("");
   const [organisationSlug, setOrganisationSlug] = useState("");
@@ -93,18 +100,26 @@ export function CloudView() {
     if (!workspaceId || !status?.signedIn) {
       setCloudWorkflows([]);
       setApprovals([]);
+      setActivity(undefined);
       return;
     }
-    try {
-      const [nextWorkflows, nextApprovals] = await Promise.all([
+    const results = await Promise.allSettled([
         api.listCloudWorkflows(workspaceId),
         api.listCloudWorkflowApprovals(workspaceId),
+        api.getWorkspaceActivity(workspaceId),
       ]);
-      setCloudWorkflows(nextWorkflows);
-      setApprovals(nextApprovals);
-    } catch (value) {
-      setError(String(value));
+    const [workflowResult, approvalResult, activityResult] = results;
+    if (workflowResult.status === "fulfilled") setCloudWorkflows(workflowResult.value);
+    if (approvalResult.status === "fulfilled") setApprovals(approvalResult.value);
+    if (activityResult.status === "fulfilled") {
+      setActivity(activityResult.value);
+      setActivityStale(false);
+    } else {
+      setActivityStale(true);
     }
+    const failed = ["workflows", "approvals", "activity"].filter((_, index) => results[index].status === "rejected");
+    if (failed.length) setError(`Some cloud data could not be refreshed: ${failed.join(", ")}. Last successful data is still shown.`);
+    else setError(undefined);
   }, [status?.signedIn, workspaceId]);
 
   useEffect(() => {
@@ -114,6 +129,25 @@ export function CloudView() {
   useEffect(() => {
     void loadRemote();
   }, [loadRemote]);
+  useEffect(() => {
+    if (!workspaceId || !status?.signedIn) return;
+    const refresh = () => { if (document.visibilityState === "visible") void loadRemote(); };
+    const timer = window.setInterval(refresh, 15_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+  }, [loadRemote, status?.signedIn, workspaceId]);
+  useEffect(() => {
+    const openSection = (section?: string) => {
+      const value = section ?? localStorage.getItem("sandbox.cloud.section.v1") ?? undefined;
+      if (!value) return;
+      localStorage.removeItem("sandbox.cloud.section.v1");
+      window.setTimeout(() => document.getElementById(`cloud-${value}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    };
+    const event = (value: Event) => openSection((value as CustomEvent<string>).detail);
+    window.addEventListener("sandbox:cloud-section", event);
+    openSection();
+    return () => window.removeEventListener("sandbox:cloud-section", event);
+  }, [loading, workspaceId]);
   useEffect(() => {
     if (!api.isDesktop) return;
     const stops: Array<() => void> = [];
@@ -353,6 +387,10 @@ export function CloudView() {
             </button>
           </section>
 
+          {workspaceId && <nav className="cloud-account-links" aria-label="Workspace account links">
+            {[['Operations', 'operations'], ['Usage', 'usage'], ['Workspace', 'organisations'], ['Support', 'support']].map(([label, path]) => <button className="button" key={path} onClick={() => void openUrl(`https://app.sndbox.app/${path}?workspaceId=${encodeURIComponent(workspaceId)}`).catch((value) => toast.push(String(value), "error"))}>{label}<ExternalLink size={12} /></button>)}
+          </nav>}
+
           {organisations.flatMap((item) => item.workspaces).length ? (
             <section className="cloud-workspace-card">
               <div className="cloud-workspace-heading">
@@ -428,7 +466,8 @@ export function CloudView() {
           )}
 
           {workspaceId && (
-            <div className="cloud-sync-grid">
+
+            <div className="cloud-sync-grid" id="cloud-workflows">
               <section className="cloud-list-card">
                 <header>
                   <div><FolderGit2 size={17} /><span><b>Local workflows</b><small>Choose what leaves this device.</small></span></div>
@@ -478,7 +517,7 @@ export function CloudView() {
             </div>
           )}
           {workspaceId && approvals.length > 0 && (
-            <section className="cloud-approvals-card">
+            <section className="cloud-approvals-card" id="cloud-approvals">
               <header>
                 <div><ShieldCheck size={17} /><span><b>Publication reviews</b><small>Approval and publication are separate, auditable steps.</small></span></div>
                 <em>{approvals.filter((item) => item.status === "pending").length} pending</em>
@@ -517,6 +556,16 @@ export function CloudView() {
               </div>
             </section>
           )}
+          {workspaceId && <section className="cloud-activity-card" id="cloud-activity">
+            <header><div><Activity size={17} /><span><b>Workspace activity</b><small>Remote runner health and recent redacted run summaries.</small></span></div><em>{activityStale ? "Last known data" : activity ? `Updated ${new Date(activity.generatedAt).toLocaleTimeString()}` : "Unavailable"}</em></header>
+            {activity && <div className="cloud-activity-summary">
+              <div><b>{activity.runners.filter((runner) => runner.status === "online").length}/{activity.runners.length}</b><small>runners online</small></div>
+              <div><b>{activity.pendingApprovalCount}</b><small>pending reviews</small></div>
+              <div><b>{activity.syncConflictCount}</b><small>sync conflicts</small></div>
+              <div><b>{activity.webhookFailureCount}</b><small>webhook failures</small></div>
+            </div>}
+            {activity?.runs.length ? <div className="cloud-run-list">{activity.runs.slice(0, 8).map((run) => <article key={run.id}><span><b>{cloudWorkflows.find((item) => item.workflowId === run.workflowId)?.name ?? run.workflowId}</b><small>{new Date(run.startedAt ?? activity.generatedAt).toLocaleString()} · {run.trigger}</small></span><StatusBadge tone={run.status === "failed" ? "danger" : run.status === "successful" ? "success" : "info"}>{run.status}</StatusBadge>{run.redactedErrorSummary && <p>{run.redactedErrorSummary}</p>}</article>)}</div> : <div className="cloud-inline-empty">No remote runs have been reported for this workspace.</div>}
+          </section>}
         </>
       )}
     </main>

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { WorkspaceActivitySummary } from "@sandbox/contracts";
 import type {
   AiWorkflowProposal,
   AccountStatus,
@@ -97,6 +98,10 @@ export const api = {
     tauri
       ? invoke<WorkflowSummary>("update_workflow_metadata", { id, patch })
       : previewApi.updateWorkflowMetadata(id, patch),
+  batchUpdateWorkflowMetadata: (ids: string[], patch: WorkflowMetadataPatch) =>
+    tauri
+      ? invoke<void>("batch_update_workflow_metadata", { ids, patch })
+      : previewApi.batchUpdateWorkflowMetadata(ids, patch),
   duplicateWorkflow: (id: string, name?: string) =>
     tauri
       ? invoke<Workflow>("duplicate_workflow", { id, name })
@@ -105,10 +110,14 @@ export const api = {
     tauri
       ? invoke<void>("archive_workflow", { id })
       : previewApi.archiveWorkflow(id),
+  archiveWorkflows: (ids: string[]) =>
+    tauri ? invoke<void>("archive_workflows", { ids }) : previewApi.archiveWorkflows(ids),
   restoreWorkflow: (id: string) =>
     tauri
       ? invoke<void>("restore_workflow", { id })
       : previewApi.restoreWorkflow(id),
+  restoreWorkflows: (ids: string[]) =>
+    tauri ? invoke<void>("restore_workflows", { ids }) : previewApi.restoreWorkflows(ids),
   purgeWorkflow: (id: string) =>
     tauri
       ? invoke<void>("purge_workflow", { id })
@@ -390,6 +399,10 @@ export const api = {
     tauri
       ? invoke<CloudWorkflow[]>("list_cloud_workflows", { workspaceId })
       : Promise.resolve([]),
+  getWorkspaceActivity: (workspaceId: string) =>
+    tauri
+      ? invoke<WorkspaceActivitySummary>("get_workspace_activity", { workspaceId })
+      : Promise.resolve<WorkspaceActivitySummary>({ generatedAt: new Date().toISOString(), runners: [], runs: [], pendingApprovalCount: 0, webhookFailureCount: 0, syncConflictCount: 0 }),
   pushCloudWorkflow: (
     workflowId: string,
     workspaceId: string,

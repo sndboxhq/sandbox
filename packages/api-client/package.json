@@ -18,6 +18,9 @@
     "dist/index.d.ts.map",
     "README.md"
   ],
+  "dependencies": {
+    "@sandbox/contracts": "*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"

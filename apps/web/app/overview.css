@@ -1,4 +1,32 @@
 .overview-lead-grid { display: grid; grid-template-columns: minmax(0,1.7fr) minmax(285px,.75fr); gap: 12px; }
+.overview-activity { margin-bottom: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow: hidden; }
+.overview-activity > header { min-height: 60px; padding: 12px 15px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.overview-activity > header > div { display: flex; align-items: center; gap: 9px; }
+.overview-activity > header svg { width: 15px; color: var(--accent); }
+.overview-activity > header > div > span { display: grid; gap: 3px; }
+.overview-activity > header small { color: var(--dim); font-size: 9px; letter-spacing: .07em; }
+.overview-activity > header h2 { margin: 0; font-size: 16px; }
+.overview-activity > header > span { color: var(--dim); font-size: 10px; }
+.overview-activity-metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); border-bottom: 1px solid var(--line); }
+.overview-activity-metrics > div { min-height: 68px; padding: 11px 15px; border-right: 1px solid var(--line); display: grid; align-content: center; gap: 4px; }
+.overview-activity-metrics > div:last-child { border-right: 0; }
+.overview-activity-metrics strong { font: 18px ui-monospace,SFMono-Regular,Consolas,monospace; }
+.overview-activity-metrics small { color: var(--muted); font-size: 10px; }
+.overview-activity-lists { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.overview-activity-lists > section + section { border-left: 1px solid var(--line); }
+.overview-activity-lists section > header { min-height: 43px; padding: 8px 13px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+.overview-activity-lists h3 { margin: 0; font-size: 11px; }
+.overview-activity-lists header a { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 9px; }
+.overview-activity-lists header a svg { width: 10px; }
+.overview-activity-lists article { min-height: 56px; padding: 9px 13px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 5px 10px; }
+.overview-activity-lists article:last-child { border-bottom: 0; }
+.overview-activity-lists article > span { min-width: 0; display: grid; gap: 3px; }
+.overview-activity-lists article strong,.overview-activity-lists article small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-activity-lists article strong { font-size: 10px; }.overview-activity-lists article small { color: var(--dim); font-size: 9px; }
+.overview-activity-lists article p { grid-column: 1/-1; margin: 0; color: var(--red); font-size: 9px; }
+.overview-activity-empty { min-height: 56px; margin: 0; padding: 18px 13px; color: var(--dim); font-size: 10px; }
+.overview-activity-error { margin: 14px; }
+.overview-activity-stale { margin: 10px 12px 0; }
 .overview-cloud-card,.overview-account-card,.overview-workspaces,.overview-actions { border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow: hidden; }
 
 .overview-cloud-card { min-height: 286px; padding: 20px 22px; display: flex; flex-direction: column; }
@@ -61,6 +89,9 @@
   .overview-account-card { min-height: 250px; }
 }
 @media (max-width: 600px) {
+  .overview-activity-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .overview-activity-metrics > div:nth-child(2) { border-right: 0; }.overview-activity-metrics > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .overview-activity-lists { grid-template-columns: 1fr; }.overview-activity-lists > section + section { border-left: 0; border-top: 1px solid var(--line); }
   .overview-cloud-card { min-height: 300px; padding: 17px; }
   .overview-cloud-card > footer { align-items: stretch; flex-wrap: wrap; }
   .overview-cloud-card > footer > span { width: 100%; margin: 2px 0 0; }

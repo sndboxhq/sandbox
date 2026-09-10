@@ -83,4 +83,13 @@ describe("SandboxApiClient v1 compatibility",()=>{
     expect(String(fetch.mock.calls[1][0])).toBe("https://api.sandbox.test/v1/runs/run%2Fid");
     expect(fetch.mock.calls[1][1]?.method).toBe("GET");
   });
+
+  it("exposes the typed workspace activity summary route", async () => {
+    const payload = { generatedAt: "2026-09-10T10:15:00.000Z", runners: [], runs: [], pendingApprovalCount: 2, webhookFailureCount: 1, syncConflictCount: 3 };
+    const fetch = vi.fn(async () => json(payload));
+    const client = new SandboxApiClient({ baseUrl: "https://api.sandbox.test", fetch });
+    const result = await client.getWorkspaceActivity("workspace/id", 25);
+    expect(result.data).toEqual(payload);
+    expect(String(fetch.mock.calls[0][0])).toBe("https://api.sandbox.test/v1/workspaces/workspace%2Fid/activity?limit=25");
+  });
 });

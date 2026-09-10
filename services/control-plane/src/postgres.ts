@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
-import type { AuditEvent, BuiltInRole, DeploymentRecord, MarketplaceListing, Permission, RunnerCommand, RunnerRecord, RunSummary, WorkflowRevision } from "@sandbox/contracts";
+import type { AuditEvent, BuiltInRole, DeploymentRecord, MarketplaceListing, Permission, RunnerCommand, RunnerRecord, RunSummary, WorkflowRevision, WorkspaceActivitySummary } from "@sandbox/contracts";
 import { permissions as allPermissions, rolePermissionMatrix } from "@sandbox/contracts";
 import { Pool, type PoolClient } from "pg";
 import { satisfies } from "semver";
@@ -917,13 +917,14 @@ export class PostgresRepository implements ControlPlaneRepository {
     });
   }
 
-  async listWorkspaceActivity(actor: AuthenticatedSession, workspaceId: string, limit: number) {
+  async listWorkspaceActivity(actor: AuthenticatedSession, workspaceId: string, limit: number): Promise<WorkspaceActivitySummary> {
     return this.withAccount(actor.accountId, async client => {
       const runners = await client.query<RunnerRow>(`SELECT id,workspace_id,display_name,operating_system,architecture,application_version,protocol_version,plugin_runtime_version,capabilities,safe_folder_labels,browser_engine,installed_plugin_versions,tags,status,current_workload,paired_at,last_seen_at FROM runners WHERE workspace_id=$1 AND revoked_at IS NULL ORDER BY last_seen_at DESC NULLS LAST,id LIMIT 100`, [workspaceId]);
       const runs = await client.query<RunSummaryRow>(`SELECT id,workspace_id,workflow_id,revision_id,runner_id,trigger,status,started_at,duration_ms,failed_node_id,redacted_error_summary FROM run_summaries WHERE workspace_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2`, [workspaceId, limit]);
       const approvals = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM workflow_approvals WHERE workspace_id=$1 AND status='pending'`, [workspaceId]);
       const webhooks = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM webhook_deliveries WHERE workspace_id=$1 AND status='failed'`, [workspaceId]);
-      return { runners: runners.rows.map(runnerFromRow), runs: runs.rows.map(runSummaryFromRow), pendingApprovalCount: Number(approvals.rows[0]?.count ?? 0), webhookFailureCount: Number(webhooks.rows[0]?.count ?? 0) };
+      const conflicts = await client.query<{ count: string }>(`SELECT count(DISTINCT revision.workflow_id)::text AS count FROM workflow_revisions revision JOIN synced_workflows workflow ON workflow.id=revision.workflow_id WHERE workflow.workspace_id=$1 AND revision.sync_state='conflicted'`, [workspaceId]);
+      return { generatedAt: new Date().toISOString(), runners: runners.rows.map(runnerFromRow), runs: runs.rows.map(runSummaryFromRow), pendingApprovalCount: Number(approvals.rows[0]?.count ?? 0), webhookFailureCount: Number(webhooks.rows[0]?.count ?? 0), syncConflictCount: Number(conflicts.rows[0]?.count ?? 0) };
     });
   }
 

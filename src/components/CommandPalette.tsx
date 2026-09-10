@@ -33,6 +33,7 @@ export interface CommandAction {
   action: () => void;
 }
 const recentKey = "sandbox.recent-node-types.v1";
+const recentCommandKey = "sandbox.recent-commands.v1";
 const suggestedFor = (source?: NodeType) =>
   source && isTrigger(source)
     ? ["condition", "http_request", "set_data", "open_browser"]
@@ -69,6 +70,13 @@ export function CommandPalette({
   const recent = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem(recentKey) ?? "[]") as NodeType[];
+    } catch {
+      return [];
+    }
+  }, [open]);
+  const recentCommands = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem(recentCommandKey) ?? "[]") as string[];
     } catch {
       return [];
     }
@@ -157,13 +165,22 @@ export function CommandPalette({
         action: () => undefined,
       }),
     );
+    const ordered = needle
+      ? all
+      : [
+          ...recentCommands
+            .map((id) => all.find((item) => item.id === id))
+            .filter((item): item is Choice => Boolean(item))
+            .map((item) => ({ ...item, group: "Recent commands" })),
+          ...all,
+        ];
     const filtered = needle
-      ? all.filter((item) =>
+      ? ordered.filter((item) =>
           (item.name + item.description + item.group + (item.category ?? ""))
             .toLowerCase()
             .includes(needle),
         )
-      : all;
+      : ordered;
     const seen = new Set<string>();
     return filtered.filter((item) => {
       if (seen.has(item.id)) return false;
@@ -180,6 +197,7 @@ export function CommandPalette({
     unavailablePluginNodes,
     query,
     recent,
+    recentCommands,
     sourceType,
   ]);
   useEffect(() => {
@@ -193,6 +211,12 @@ export function CommandPalette({
   const activate = (index: number) => {
     const item = choices[index];
     if (item && !item.disabled) {
+      localStorage.setItem(
+        recentCommandKey,
+        JSON.stringify(
+          [item.id, ...recentCommands.filter((id) => id !== item.id)].slice(0, 8),
+        ),
+      );
       item.action();
       onClose();
     }

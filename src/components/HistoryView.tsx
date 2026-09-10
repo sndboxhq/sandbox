@@ -125,10 +125,19 @@ export function HistoryView() {
   };
   const openEditor = async (nodeId?: string) => {
     if (!selectedExecution) return;
-    if (nodeId)
+    const failedNodeId = nodeId ?? selectedExecution.nodeExecutions.find((node) => node.status === "failed")?.nodeId;
+    localStorage.setItem(
+      "sandbox.editor.recovery-context.v1",
+      JSON.stringify({
+        workflowId: selectedExecution.workflowId,
+        executionId: selectedExecution.id,
+        nodeId: failedNodeId,
+      }),
+    );
+    if (failedNodeId)
       localStorage.setItem(
         "sandbox.editor.focus-node.v1",
-        JSON.stringify({ workflowId: selectedExecution.workflowId, nodeId }),
+        JSON.stringify({ workflowId: selectedExecution.workflowId, nodeId: failedNodeId }),
       );
     await openWorkflow(selectedExecution.workflowId);
   };

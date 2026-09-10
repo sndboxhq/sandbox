@@ -22,6 +22,7 @@ import {
   Command,
   History,
   Play,
+  RotateCcw,
   Save,
   ShieldAlert,
   ShieldCheck,
@@ -185,6 +186,21 @@ function workflowOutputHandles(node:WorkflowNode):string[]{
   return [];
 }
 
+interface RecoveryContext {
+  workflowId: string;
+  executionId: string;
+  nodeId?: string;
+}
+
+function readRecoveryContext(workflowId: string): RecoveryContext | undefined {
+  try {
+    const value = JSON.parse(localStorage.getItem("sandbox.editor.recovery-context.v1") ?? "null") as RecoveryContext | null;
+    return value?.workflowId === workflowId && value.executionId ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function WorkflowEditor() {
   const toast = useToast();
   const { activeWorkflow, setView, saveWorkflow } = useAppStore();
@@ -223,6 +239,7 @@ export function WorkflowEditor() {
   const issueTracking = useIssueTracking(workflow.id, issues);
   const [runningNode, setRunningNode] = useState<string>();
   const [run, setRun] = useState<ExecutionRecord>();
+  const [recoveryContext, setRecoveryContext] = useState(() => readRecoveryContext(activeWorkflow!.id));
   const [testDataExecutions,setTestDataExecutions]=useState<ExecutionRecord[]>([]);
   const [testDataExecutionId,setTestDataExecutionId]=useState("");
   const [bottomOpen, setBottomOpen] = useState(() => rememberedEditor?.executionDrawerOpen ?? false);
@@ -553,23 +570,43 @@ export function WorkflowEditor() {
     return () => window.clearTimeout(timer);
   }, [workflow]);
   const doRun = useCallback(async () => {
-    if (!(await doSave())) return;
+    if (!(await doSave())) return false;
     const result = await test();
-    if (result.some((issue) => issue.severity === "error")) return;
+    if (result.some((issue) => issue.severity === "error")) return false;
     setRunning(true);
     setBottomOpen(true);
     try {
       const execution = await api.runWorkflow(workflow.id);
       setRun(execution);
+      return true;
     } catch (error) {
       setIssues([
         { code: "runner_error", message: String(error), severity: "error" },
       ]);
+      return false;
     } finally {
       setRunning(false);
       setRunningNode(undefined);
     }
   }, [doSave, test, workflow.id]);
+  const clearRecoveryContext = useCallback(() => {
+    localStorage.removeItem("sandbox.editor.recovery-context.v1");
+    setRecoveryContext(undefined);
+  }, []);
+  const retryRecoveryStep = useCallback(async () => {
+    if (!recoveryContext?.nodeId || !(await doSave())) return;
+    setRunning(true);
+    setBottomOpen(true);
+    try {
+      setRun(await api.retryFailedNode(recoveryContext.executionId, recoveryContext.nodeId));
+      setIssues([]);
+      clearRecoveryContext();
+    } catch (error) {
+      setIssues([{ code: "runner_error", message: String(error), severity: "error" }]);
+    } finally {
+      setRunning(false);
+    }
+  }, [clearRecoveryContext, doSave, recoveryContext]);
   const retryNode = useCallback(
     async (nodeId: string) => {
       if (!run) return;
@@ -1179,6 +1216,24 @@ export function WorkflowEditor() {
           {running ? "Running…" : "Run"}
         </button>
       </header>
+      {recoveryContext && (
+        <section className="recovery-context-bar" aria-label="Failed run recovery">
+          <ShieldAlert size={16} />
+          <div>
+            <strong>Editing from a failed run</strong>
+            <span>Your changes stay linked to the originating execution until you retry or dismiss this recovery task.</span>
+          </div>
+          {recoveryContext.nodeId && (
+            <button className="button" disabled={running || saveState === "saving"} onClick={() => void retryRecoveryStep()}>
+              <RotateCcw size={13} /> Retry failed step
+            </button>
+          )}
+          <button className="button primary" disabled={running || saveState === "saving"} onClick={() => void doRun().then((started) => started && clearRecoveryContext())}>
+            <Play size={13} /> Run workflow again
+          </button>
+          <button className="icon-button" aria-label="Dismiss recovery context" onClick={clearRecoveryContext}>×</button>
+        </section>
+      )}
       <AiWorkflowChat
         id="ai-workflow-chat"
         open={aiChatOpen}

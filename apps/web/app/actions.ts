@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { authenticatedClient, sessionCookie } from "../lib/auth";
+import { workspaceContextCookie } from "../lib/workspace-context";
+import type { PortalActionResult } from "./action-result";
 
 async function client() {
   const value = await authenticatedClient();
@@ -19,73 +21,84 @@ function field(formData: FormData, name: string): string {
   return value.trim();
 }
 
-export async function createOrganisationAction(formData: FormData) {
-  const api = await client();
-  await api.createOrganisation({
-    name: field(formData, "name"),
-    slug: field(formData, "slug"),
-  });
-  revalidatePath("/organisations");
+function actionError(error: unknown, fallback: string): PortalActionResult {
+  return { status: "error", message: error instanceof Error ? error.message : fallback };
 }
 
-export async function inviteMemberAction(formData: FormData) {
+export async function setWorkspaceContextAction(formData: FormData) {
   const api = await client();
   const workspaceId = field(formData, "workspaceId");
-  await api.request({
-    method: "POST",
-    path: `/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`,
-    body: {
-      email: field(formData, "email"),
-      role: field(formData, "role"),
-      workspaceIds: [workspaceId],
-      expiresInHours: 72,
-    },
-  });
-  revalidatePath("/organisations");
+  const organisations = (await api.listAccountOrganisations()).data.items;
+  if (!organisations.some((organisation) => organisation.workspaces.some((workspace) => workspace.id === workspaceId))) throw new Error("That workspace is no longer available to this account.");
+  (await cookies()).set(workspaceContextCookie, workspaceId, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
+  const requested = (formData.get("returnTo") as string | null) ?? "/";
+  const safePath = requested.startsWith("/") && !requested.startsWith("//") ? requested : "/";
+  const target = new URL(safePath, "https://app.sndbox.app");
+  target.searchParams.set("workspaceId", workspaceId);
+  redirect(`${target.pathname}${target.search}${target.hash}`);
 }
 
-export async function decideApprovalAction(formData: FormData) {
-  const api = await client();
-  const workspaceId = field(formData, "workspaceId");
-  const decision = field(formData, "decision") as "approved" | "rejected";
-  await api.decideWorkflowApproval(
-    workspaceId,
-    field(formData, "approvalId"),
-    decision,
-    (formData.get("reason") as string | null)?.trim() || null,
-  );
-  revalidatePath("/organisations");
+export async function createOrganisationAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    await api.createOrganisation({ name: field(formData, "name"), slug: field(formData, "slug") });
+    revalidatePath("/organisations");
+    return { status: "success", message: "Organisation created." };
+  } catch (error) { return actionError(error, "The organisation could not be created."); }
 }
 
-export async function publishWorkflowAction(formData: FormData) {
-  const api = await client();
-  await api.publishWorkflow(
-    field(formData, "workspaceId"),
-    field(formData, "workflowId"),
-    field(formData, "revisionId"),
-    field(formData, "changeSummary"),
-  );
-  revalidatePath("/organisations");
+export async function inviteMemberAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    const workspaceId = field(formData, "workspaceId");
+    await api.request({ method: "POST", path: `/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`, body: { email: field(formData, "email"), role: field(formData, "role"), workspaceIds: [workspaceId], expiresInHours: 72 } });
+    revalidatePath("/organisations");
+    return { status: "success", message: "Workspace invitation sent." };
+  } catch (error) { return actionError(error, "The invitation could not be sent."); }
 }
 
-export async function transitionDeploymentAction(formData: FormData) {
-  const api = await client();
-  const workspaceId = field(formData, "workspaceId");
-  const status = field(formData, "status");
-  if (status !== "active" && status !== "paused" && status !== "rolled_back") {
-    throw new Error("Unsupported deployment transition.");
-  }
-  await api.transitionDeployment(workspaceId, field(formData, "deploymentId"), {
-    status,
-    reason: field(formData, "reason"),
-  });
-  revalidatePath("/organisations");
+export async function decideApprovalAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    const workspaceId = field(formData, "workspaceId");
+    const decision = field(formData, "decision") as "approved" | "rejected";
+    const reason = (formData.get("reason") as string | null)?.trim() || null;
+    if (decision !== "approved" && decision !== "rejected") return { status: "error", message: "Choose approve or reject." };
+    if (decision === "rejected" && !reason) return { status: "error", message: "Add a review note before rejecting.", fieldErrors: { reason: "A rejection reason is required." } };
+    await api.decideWorkflowApproval(workspaceId, field(formData, "approvalId"), decision, reason);
+    revalidatePath("/organisations");
+    return { status: "success", message: decision === "approved" ? "Revision approved." : "Revision rejected." };
+  } catch (error) { return actionError(error, "The review decision could not be saved."); }
 }
 
-export async function revokeSessionAction(formData: FormData) {
-  const api = await client();
-  await api.revokeAccountSession(field(formData, "sessionId"));
-  revalidatePath("/security");
+export async function publishWorkflowAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    await api.publishWorkflow(field(formData, "workspaceId"), field(formData, "workflowId"), field(formData, "revisionId"), field(formData, "changeSummary"));
+    revalidatePath("/organisations");
+    return { status: "success", message: "Approved revision published." };
+  } catch (error) { return actionError(error, "The revision could not be published."); }
+}
+
+export async function transitionDeploymentAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    const workspaceId = field(formData, "workspaceId");
+    const status = field(formData, "status");
+    if (status !== "active" && status !== "paused" && status !== "rolled_back") return { status: "error", message: "Unsupported deployment transition." };
+    await api.transitionDeployment(workspaceId, field(formData, "deploymentId"), { status, reason: field(formData, "reason") });
+    revalidatePath("/organisations");
+    return { status: "success", message: status === "paused" ? "Deployment paused." : "Deployment resumed." };
+  } catch (error) { return actionError(error, "The deployment state could not be changed."); }
+}
+
+export async function revokeSessionAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    await api.revokeAccountSession(field(formData, "sessionId"));
+    revalidatePath("/security");
+    return { status: "success", message: "Device session revoked." };
+  } catch (error) { return actionError(error, "The device session could not be revoked."); }
 }
 
 export interface PersonalTokenActionState {
@@ -128,13 +141,13 @@ export async function issuePersonalTokenAction(
   }
 }
 
-export async function revokePersonalTokenAction(formData: FormData) {
-  const api = await client();
-  await api.revokePersonalAccessToken(
-    field(formData, "tokenId"),
-    "Revoked from account security settings",
-  );
-  revalidatePath("/security");
+export async function revokePersonalTokenAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    await api.revokePersonalAccessToken(field(formData, "tokenId"), "Revoked from account security settings");
+    revalidatePath("/security");
+    return { status: "success", message: "API key revoked." };
+  } catch (error) { return actionError(error, "The API key could not be revoked."); }
 }
 
 export interface AccountMaintenanceState {
@@ -228,26 +241,25 @@ export async function issueRunnerPairingTokenAction(
   }
 }
 
-export async function updateRunnerStatusAction(formData: FormData) {
-  const api = await client();
-  const workspaceId = field(formData, "workspaceId");
-  await api.request({
-    method: "PATCH",
-    path: `/v1/workspaces/${encodeURIComponent(workspaceId)}/runners/${encodeURIComponent(field(formData, "runnerId"))}`,
-    body: { displayName: null, status: field(formData, "status") },
-  });
-  revalidatePath("/operations");
+export async function updateRunnerStatusAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    const workspaceId = field(formData, "workspaceId");
+    const status = field(formData, "status");
+    await api.request({ method: "PATCH", path: `/v1/workspaces/${encodeURIComponent(workspaceId)}/runners/${encodeURIComponent(field(formData, "runnerId"))}`, body: { displayName: null, status } });
+    revalidatePath("/operations");
+    return { status: "success", message: status === "draining" ? "Runner is draining." : "Runner resumed." };
+  } catch (error) { return actionError(error, "The runner state could not be changed."); }
 }
 
-export async function revokeRunnerAction(formData: FormData) {
-  const api = await client();
-  const workspaceId = field(formData, "workspaceId");
-  await api.request({
-    method: "DELETE",
-    path: `/v1/workspaces/${encodeURIComponent(workspaceId)}/runners/${encodeURIComponent(field(formData, "runnerId"))}`,
-    body: {},
-  });
-  revalidatePath("/operations");
+export async function revokeRunnerAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    const workspaceId = field(formData, "workspaceId");
+    await api.request({ method: "DELETE", path: `/v1/workspaces/${encodeURIComponent(workspaceId)}/runners/${encodeURIComponent(field(formData, "runnerId"))}`, body: {} });
+    revalidatePath("/operations");
+    return { status: "success", message: "Runner access revoked." };
+  } catch (error) { return actionError(error, "Runner access could not be revoked."); }
 }
 
 export interface AccountDeletionState {
@@ -338,11 +350,11 @@ export async function issueScimTokenAction(
   }
 }
 
-export async function revokeScimTokenAction(formData: FormData) {
-  const api = await client();
-  await api.revokeScimToken(
-    field(formData, "organisationId"),
-    field(formData, "tokenId"),
-  );
-  revalidatePath("/organisations");
+export async function revokeScimTokenAction(_state: PortalActionResult, formData: FormData): Promise<PortalActionResult> {
+  try {
+    const api = await client();
+    await api.revokeScimToken(field(formData, "organisationId"), field(formData, "tokenId"));
+    revalidatePath("/organisations");
+    return { status: "success", message: "SCIM credential revoked." };
+  } catch (error) { return actionError(error, "The SCIM credential could not be revoked."); }
 }

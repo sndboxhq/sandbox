@@ -341,6 +341,21 @@ pub async fn list_cloud_workflows(
 }
 
 #[tauri::command]
+pub async fn get_workspace_activity(
+    workspace_id: String,
+    state: State<'_, AppState>,
+) -> Result<Value> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    control_plane_json(
+        &state,
+        Method::GET,
+        &format!("/v1/workspaces/{workspace_id}/activity?limit=30"),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn push_cloud_workflow(
     workflow_id: String,
     workspace_id: String,
@@ -687,6 +702,20 @@ pub fn update_workflow_metadata(
 }
 
 #[tauri::command]
+pub fn batch_update_workflow_metadata(
+    ids: Vec<String>,
+    patch: WorkflowMetadataPatch,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    state
+        .engine
+        .database()
+        .batch_update_workflow_metadata(&ids, patch)
+        .map(|_| ())
+        .map_err(err)
+}
+
+#[tauri::command]
 pub fn duplicate_workflow(
     id: String,
     name: Option<String>,
@@ -756,6 +785,15 @@ pub fn archive_workflow(id: String, state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
+pub fn archive_workflows(ids: Vec<String>, state: State<'_, AppState>) -> Result<()> {
+    state
+        .engine
+        .database()
+        .set_workflows_archived(&ids, true)
+        .map_err(err)
+}
+
+#[tauri::command]
 pub fn restore_workflow(id: String, state: State<'_, AppState>) -> Result<()> {
     let mut workflow = state
         .engine
@@ -783,6 +821,15 @@ pub fn restore_workflow(id: String, state: State<'_, AppState>) -> Result<()> {
         )
         .map_err(err)?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn restore_workflows(ids: Vec<String>, state: State<'_, AppState>) -> Result<()> {
+    state
+        .engine
+        .database()
+        .set_workflows_archived(&ids, false)
+        .map_err(err)
 }
 
 fn remove_safe_artifacts(paths: Vec<String>, root: &std::path::Path) {

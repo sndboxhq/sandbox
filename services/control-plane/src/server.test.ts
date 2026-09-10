@@ -97,6 +97,25 @@ describe("control-plane API", () => {
     const server=await createServer(deps),response=await server.inject({method:"GET",url:`/v1/workspaces/${workspaceId}/usage?days=30`,headers:{authorization:"Bearer token"}});
     expect(response.statusCode,response.body).toBe(200);expect(response.json()).toEqual(summary);expect(workspaceSummary).toHaveBeenCalledWith(workspaceId,30);expect(deps.repository.permissions).toHaveBeenCalledWith(session.accountId,workspaceId);await server.close();
   });
+  it("authorizes and returns additive workspace activity health fields", async () => {
+    const summary = { generatedAt: "2026-09-10T10:15:00.000Z", runners: [], runs: [], pendingApprovalCount: 2, webhookFailureCount: 1, syncConflictCount: 3 };
+    const allowed = dependencies(["executions.view_summary"]);
+    allowed.repository.listWorkspaceActivity = vi.fn(async () => summary);
+    const server = await createServer(allowed);
+    const response = await server.inject({ method: "GET", url: `/v1/workspaces/${workspaceId}/activity?limit=25`, headers: { authorization: "Bearer token" } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual(summary);
+    expect(allowed.repository.listWorkspaceActivity).toHaveBeenCalledWith(session, workspaceId, 25);
+    await server.close();
+
+    const denied = dependencies([]);
+    denied.repository.listWorkspaceActivity = vi.fn(async () => summary);
+    const deniedServer = await createServer(denied);
+    const forbidden = await deniedServer.inject({ method: "GET", url: `/v1/workspaces/${workspaceId}/activity`, headers: { authorization: "Bearer token" } });
+    expect(forbidden.statusCode).toBe(403);
+    expect(denied.repository.listWorkspaceActivity).not.toHaveBeenCalled();
+    await deniedServer.close();
+  });
   it("returns stable structured transport errors and correlation headers",async()=>{
     const deps=dependencies([]);const server=await createServer(deps);
     const response=await server.inject({method:"POST",url:"/v1/personal-access-tokens",headers:{authorization:"Bearer token","content-type":"application/json","x-correlation-id":"client-correlation-0001"},payload:'{"broken":'});

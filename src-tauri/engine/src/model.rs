@@ -644,6 +644,10 @@ pub struct WorkflowMetadataPatch {
     pub favorite: Option<bool>,
     pub folder: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub add_tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub remove_tags: Option<Vec<String>>,
     pub archived_at: Option<Option<DateTime<Utc>>>,
     pub last_opened_at: Option<Option<DateTime<Utc>>>,
 }

@@ -1,4 +1,4 @@
-import type { AuditEvent, BuiltInRole, DeploymentRecord, MarketplaceListing, Permission, RunnerAuthorizationContext, RunnerCommand, RunnerRecord, RunnerRequirements, RunSummary, UsageEstimate, WorkflowRevision } from "@sandbox/contracts";
+import type { AuditEvent, BuiltInRole, DeploymentRecord, MarketplaceListing, Permission, RunnerAuthorizationContext, RunnerCommand, RunnerRecord, RunnerRequirements, RunSummary, UsageEstimate, WorkflowRevision, WorkspaceActivitySummary } from "@sandbox/contracts";
 import type { BillingEvent } from "./billing.js";
 
 export interface AuthenticatedSession {
@@ -162,7 +162,7 @@ export interface ControlPlaneRepository {
   updateRunnerCommandStatus(device: RunnerDeviceSession, commandId: string, status: "accepted" | "rejected" | "completed", resultSummary: Record<string, unknown> | null): Promise<boolean>;
   recordRunnerTriggerEvents(device: RunnerDeviceSession, events: RunnerTriggerEventInput[]): Promise<{ acceptedEventIds: string[]; duplicateEventIds: string[] }>;
   recordRunSummary(device: RunnerDeviceSession, summary: RunSummary): Promise<void>;
-  listWorkspaceActivity(actor: AuthenticatedSession, workspaceId: string, limit: number): Promise<{ runners: RunnerRecord[]; runs: RunSummary[]; pendingApprovalCount: number; webhookFailureCount: number }>;
+  listWorkspaceActivity(actor: AuthenticatedSession, workspaceId: string, limit: number): Promise<WorkspaceActivitySummary>;
   listDeployments(actor: AuthenticatedSession, workspaceId: string): Promise<DeploymentRecord[]>;
   createDeployment(actor:AuthenticatedSession,workspaceId:string,input:DeploymentCreationInput,correlationId:string):Promise<DeploymentRecord>;
   transitionDeployment(actor:AuthenticatedSession,workspaceId:string,deploymentId:string,status:DeploymentRecord["status"],reason:string,correlationId:string):Promise<{deploymentId:string;status:DeploymentRecord["status"]}|null>;

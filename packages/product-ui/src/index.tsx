@@ -2,6 +2,21 @@ import { Handle, Position } from "@xyflow/react";
 import { AlertTriangle, Plus, type LucideIcon } from "lucide-react";
 import "./node-card.css";
 
+export {
+  ActionFeedback,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  ProductButton,
+  StatusBadge,
+  ToastRegion,
+  type ActionFeedbackProps,
+  type ProductButtonProps,
+  type StatusTone,
+} from "./primitives";
+export { ProductDialog } from "./dialog";
+export { rankAttentionItems, type AttentionItem, type AttentionSeverity } from "./attention";
+
 export type ProductNodeStatus =
   | "idle"
   | "waiting"

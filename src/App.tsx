@@ -12,6 +12,8 @@ import { ConfirmDialog } from "./components/ui/Dialog";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { isTextEntryTarget, useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "./workspaceState";
+import { WORKFLOW_TEMPLATES } from "./workflowTemplates";
+import { parseDeepLink, type DeepLinkRequest } from "./deepLinks";
 import "./plugins.css";
 
 const Dashboard = lazy(() =>
@@ -68,7 +70,7 @@ const ActiveAiTabs = lazy(() =>
 export default function App() {
   const toast = useToast();
   useApplyPreferences();
-  const { view, activeWorkflow, setView } = useAppStore();
+  const { view, activeWorkflow, workflows, setView } = useAppStore();
   const startView = usePreferences((state) => state.startView);
   const restoreLastWorkspace = usePreferences((state) => state.restoreLastWorkspace);
   const initialViewApplied = useRef(false);
@@ -82,6 +84,12 @@ export default function App() {
   const [deepLinkError, setDeepLinkError] = useState<string>();
   const [deepLinkBusy, setDeepLinkBusy] = useState(false);
   const deepLink = parseDeepLink(deepLinks[0]);
+  useEffect(() => {
+    const raw = deepLinks[0];
+    if (!raw || deepLink) return;
+    setDeepLinks((current) => current.slice(1));
+    toast.push("That sndbox link is malformed or unsupported.", "error");
+  }, [deepLink, deepLinks, toast]);
   useEffect(() => {
     if (initialViewApplied.current) return;
     initialViewApplied.current = true;
@@ -134,6 +142,35 @@ export default function App() {
     ).then((unlisten) => (stop = unlisten));
     return () => stop?.();
   }, []);
+  useEffect(() => {
+    if (deepLink?.kind !== "view") return;
+    let cancelled = false;
+    setDeepLinkBusy(true);
+    void api.listAccountOrganisations().then(async (organisations) => {
+      if (cancelled) return;
+      const allowed = organisations.some((organisation) => organisation.workspaces.some((workspace) => workspace.id === deepLink.workspaceId));
+      if (!allowed) throw new Error("That workspace is no longer available to this account.");
+      if (deepLink.section === "activity")
+        await api.getWorkspaceActivity(deepLink.workspaceId);
+      else if (deepLink.section === "workflows")
+        await api.listCloudWorkflows(deepLink.workspaceId);
+      else
+        await api.listCloudWorkflowApprovals(deepLink.workspaceId, "all");
+      if (cancelled) return;
+      localStorage.setItem("sandbox.cloud.workspace", deepLink.workspaceId);
+      localStorage.setItem("sandbox.cloud.section.v1", deepLink.section);
+      setView("cloud");
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent("sandbox:cloud-section", { detail: deepLink.section })), 0);
+      toast.push("Opened the requested cloud workspace.", "success");
+      dismissDeepLink();
+    }).catch((error) => {
+      if (cancelled) return;
+      setDeepLinkError(String(error));
+      toast.push(String(error), "error");
+      dismissDeepLink();
+    }).finally(() => !cancelled && setDeepLinkBusy(false));
+    return () => { cancelled = true; };
+  }, [deepLink, setView, toast]);
   useEffect(() => {
     if (!api.isDesktop) return;
     let stop: (() => void) | undefined;
@@ -191,7 +228,7 @@ export default function App() {
       if (deepLink.kind === "template") {
         await useAppStore.getState().createWorkflow(deepLink.template);
         toast.push("Template imported as a disabled local workflow.", "success");
-      } else {
+      } else if (deepLink.kind === "marketplace") {
         if (!deepLinkInspection)
           throw new Error("The signed plugin package is still being inspected.");
         const installed = await api.installInspectedPlugin(
@@ -199,7 +236,7 @@ export default function App() {
         );
         setView("plugins");
         toast.push(`Installed ${installed.manifest.name}.`, "success");
-      }
+      } else return;
       dismissDeepLink();
     } catch (error) {
       setDeepLinkError(String(error));
@@ -301,14 +338,37 @@ export default function App() {
             description: "Review paused workflow actions.",
             action: () => setView("approvals"),
           },
-          ...useAppStore
-            .getState()
-            .workflows.slice(0, 5)
-            .map((item) => ({
-              id: `recent-${item.workflow.id}`,
+          ...[
+            ["general", "General settings", "Start view, dates, and unsaved-change behavior."],
+            ["appearance", "Appearance settings", "Theme, accent, density, and sidebar layout."],
+            ["accessibility", "Accessibility settings", "Motion, contrast, and keyboard-friendly editing."],
+            ["nodes", "Node editor settings", "Canvas, grid, AI hints, and deletion preferences."],
+            ["connections", "Connection settings", "Credentials, OAuth connections, and the local vault."],
+            ["browser", "Browser settings", "Profiles, viewport, proxy, and browser runtime."],
+            ["beta", "Updates and beta settings", "Update channel and preview features."],
+          ].map(([section, name, description]) => ({
+            id: `settings-${section}`,
+            name,
+            description,
+            group: "Settings",
+            action: () => {
+              sessionStorage.setItem("sandbox:settings-section", section);
+              setView("settings");
+              window.setTimeout(() => window.dispatchEvent(new CustomEvent("sandbox:settings-section", { detail: section })), 0);
+            },
+          })),
+          ...WORKFLOW_TEMPLATES.map((template) => ({
+            id: `template-${template.key}`,
+            name: template.name,
+            description: template.description,
+            group: "Templates",
+            action: () => void useAppStore.getState().createWorkflow(template.key, template.name),
+          })),
+          ...workflows.map((item) => ({
+              id: `workflow-${item.workflow.id}`,
               name: item.workflow.name,
-              description: "Open recent workflow",
-              group: "Recent workflows",
+              description: `${item.metadata.folder ? `${item.metadata.folder} · ` : ""}${item.workflow.description || `${item.workflow.nodes.length} nodes`}`,
+              group: item.metadata.archivedAt ? "Archived workflows" : "Workflows",
               action: () =>
                 void useAppStore.getState().openWorkflow(item.workflow.id),
             })),
@@ -330,7 +390,7 @@ export default function App() {
         </Suspense>
       )}
       <ConfirmDialog
-        open={Boolean(deepLink)}
+        open={Boolean(deepLink && deepLink.kind !== "view")}
         onOpenChange={(open) => !open && dismissDeepLink()}
         title={deepLink?.kind === "marketplace" ? "Install marketplace plugin?" : "Import workflow template?"}
         description={deepLink?.kind === "marketplace"
@@ -354,33 +414,4 @@ export default function App() {
       </ConfirmDialog>
     </div>
   );
-}
-
-type DeepLinkRequest =
-  | { kind: "marketplace"; pluginId: string; version?: string }
-  | { kind: "template"; template: string };
-
-function parseDeepLink(raw?: string): DeepLinkRequest | undefined {
-  if (!raw) return undefined;
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "sandbox:") return undefined;
-    if (url.hostname === "marketplace" && url.pathname === "/install") {
-      const pluginId = url.searchParams.get("plugin")?.trim();
-      if (!pluginId || pluginId.length > 200) return undefined;
-      return {
-        kind: "marketplace",
-        pluginId,
-        version: url.searchParams.get("version")?.trim() || undefined,
-      };
-    }
-    if (url.hostname === "templates" && url.pathname === "/import") {
-      const template = url.searchParams.get("template")?.trim();
-      if (!template || !/^[a-z0-9-]{1,80}$/.test(template)) return undefined;
-      return { kind: "template", template };
-    }
-  } catch {
-    return undefined;
-  }
-  return undefined;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   BookOpen,
@@ -19,6 +19,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { withWorkspaceContext } from "../lib/workspace-context";
 
 const navigationGroups = [
   {
@@ -49,8 +50,10 @@ const navigationGroups = [
   },
 ] as const;
 
-function NavigationLinks({ onNavigate }: { onNavigate?: () => void }) {
+function NavigationLinks({ onNavigate, workspaceId }: { onNavigate?: () => void; workspaceId?: string }) {
   const pathname = usePathname();
+  const explicitWorkspaceId = useSearchParams().get("workspaceId") ?? undefined;
+  const contextWorkspaceId = explicitWorkspaceId ?? workspaceId;
 
   return (
     <nav className="portal-nav" aria-label="Account navigation">
@@ -60,7 +63,7 @@ function NavigationLinks({ onNavigate }: { onNavigate?: () => void }) {
           {group.links.map(([href, label, Icon]) => {
             const active = href === "/" ? pathname === href : pathname.startsWith(href);
             return (
-              <Link href={href} key={href} onClick={onNavigate} aria-current={active ? "page" : undefined} className={active ? "active" : undefined}>
+              <Link href={withWorkspaceContext(href, contextWorkspaceId)} key={href} onClick={onNavigate} aria-current={active ? "page" : undefined} className={active ? "active" : undefined}>
                 <Icon aria-hidden="true" />
                 <span>{label}</span>
               </Link>
@@ -72,12 +75,13 @@ function NavigationLinks({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-export function PortalNavigation() {
-  return <NavigationLinks />;
+export function PortalNavigation({ workspaceId }: { workspaceId?: string }) {
+  return <NavigationLinks workspaceId={workspaceId} />;
 }
 
 export function PortalMobileNavigation() {
   const [open, setOpen] = useState(false);
+  const workspaceId = useSearchParams().get("workspaceId") ?? undefined;
 
   useEffect(() => {
     if (!open) return;
@@ -109,7 +113,7 @@ export function PortalMobileNavigation() {
         <>
           <button className="portal-menu-backdrop" type="button" aria-label="Close navigation" onClick={() => setOpen(false)} />
           <aside id="portal-mobile-panel" className="portal-mobile-panel" role="dialog" aria-modal="true" aria-label="Account navigation">
-            <NavigationLinks onNavigate={() => setOpen(false)} />
+            <NavigationLinks onNavigate={() => setOpen(false)} workspaceId={workspaceId} />
             <form action="/auth/sign-out" method="post" className="mobile-signout">
               <button type="submit"><KeyRound aria-hidden="true" /> Sign out</button>
             </form>

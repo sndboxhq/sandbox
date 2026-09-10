@@ -1161,44 +1161,106 @@ impl Database {
         patch: WorkflowMetadataPatch,
     ) -> Result<WorkflowMetadata, EngineError> {
         let current = self.get_workflow_metadata(id)?;
-        let folder = match patch.folder {
-            Some(value) => value
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
-            None => current.folder,
-        };
-        if folder
-            .as_ref()
-            .is_some_and(|value| value.chars().count() > 64)
-        {
-            return Err(EngineError::Storage(
-                "Folder names are limited to 64 characters.".into(),
-            ));
-        }
-        let tags = patch
-            .tags
-            .unwrap_or(current.tags)
-            .into_iter()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>();
-        if tags.len() > 10 || tags.iter().any(|value| value.chars().count() > 32) {
-            return Err(EngineError::Storage(
-                "Use at most 10 tags, each no longer than 32 characters.".into(),
-            ));
-        }
-        let metadata = WorkflowMetadata {
-            favorite: patch.favorite.unwrap_or(current.favorite),
-            folder,
-            tags,
-            archived_at: patch.archived_at.unwrap_or(current.archived_at),
-            last_opened_at: patch.last_opened_at.unwrap_or(current.last_opened_at),
-        };
+        let metadata = patched_workflow_metadata(current, &patch)?;
         self.connection.lock().map_err(|_| EngineError::Storage("Database lock was poisoned.".into()))?.execute(
             "INSERT INTO workflow_metadata(workflow_id,favorite,folder,tags_json,archived_at,last_opened_at) VALUES(?,?,?,?,?,?) ON CONFLICT(workflow_id) DO UPDATE SET favorite=excluded.favorite,folder=excluded.folder,tags_json=excluded.tags_json,archived_at=excluded.archived_at,last_opened_at=excluded.last_opened_at",
             params![id, metadata.favorite, metadata.folder, serde_json::to_string(&metadata.tags).map_err(storage)?, metadata.archived_at.map(|value|value.to_rfc3339()), metadata.last_opened_at.map(|value|value.to_rfc3339())]
         ).map_err(storage)?;
         Ok(metadata)
+    }
+
+    pub fn batch_update_workflow_metadata(
+        &self,
+        ids: &[String],
+        patch: WorkflowMetadataPatch,
+    ) -> Result<Vec<WorkflowMetadata>, EngineError> {
+        let ids = unique_workflow_ids(ids)?;
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| EngineError::Storage("Database lock was poisoned.".into()))?;
+        let transaction = connection.transaction().map_err(storage)?;
+        for id in &ids {
+            let exists = transaction
+                .query_row("SELECT 1 FROM workflows WHERE id=?", [id], |_| Ok(()))
+                .optional()
+                .map_err(storage)?;
+            if exists.is_none() {
+                return Err(EngineError::Storage(format!(
+                    "Workflow {id} no longer exists."
+                )));
+            }
+        }
+        let mut updated = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let current = transaction.query_row("SELECT favorite,folder,tags_json,archived_at,last_opened_at FROM workflow_metadata WHERE workflow_id=?", [id], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(storage)?
+                .map(workflow_metadata_from_row).unwrap_or_default();
+            let metadata = patched_workflow_metadata(current, &patch)?;
+            transaction.execute(
+                "INSERT INTO workflow_metadata(workflow_id,favorite,folder,tags_json,archived_at,last_opened_at) VALUES(?,?,?,?,?,?) ON CONFLICT(workflow_id) DO UPDATE SET favorite=excluded.favorite,folder=excluded.folder,tags_json=excluded.tags_json,archived_at=excluded.archived_at,last_opened_at=excluded.last_opened_at",
+                params![id, metadata.favorite, metadata.folder, serde_json::to_string(&metadata.tags).map_err(storage)?, metadata.archived_at.map(|value|value.to_rfc3339()), metadata.last_opened_at.map(|value|value.to_rfc3339())]
+            ).map_err(storage)?;
+            updated.push(metadata);
+        }
+        transaction.commit().map_err(storage)?;
+        Ok(updated)
+    }
+
+    pub fn set_workflows_archived(
+        &self,
+        ids: &[String],
+        archived: bool,
+    ) -> Result<(), EngineError> {
+        let ids = unique_workflow_ids(ids)?;
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| EngineError::Storage("Database lock was poisoned.".into()))?;
+        let transaction = connection.transaction().map_err(storage)?;
+        let mut workflows = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let json = transaction
+                .query_row(
+                    "SELECT definition_json FROM workflows WHERE id=?",
+                    [id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(storage)?
+                .ok_or_else(|| EngineError::Storage(format!("Workflow {id} no longer exists.")))?;
+            workflows.push(decode_workflow(&json)?);
+        }
+        let changed_at = Utc::now();
+        for mut workflow in workflows {
+            if workflow.enabled {
+                let previous = workflow.clone();
+                workflow.enabled = false;
+                workflow.updated_at = changed_at;
+                let trigger_type = workflow
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == workflow.trigger_node_id)
+                    .map(|node| node.node_type.as_str())
+                    .unwrap_or("unknown");
+                let json = serde_json::to_string(&workflow).map_err(storage)?;
+                let content_hash = workflow_content_hash(&workflow)?;
+                let parent_revision_id: Option<String> = transaction
+                    .query_row(
+                        "SELECT revision_id FROM workflow_revision_heads WHERE workflow_id=?",
+                        [&workflow.id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(storage)?;
+                let revision_id = Uuid::new_v4().to_string();
+                transaction.execute("UPDATE workflows SET enabled=0,trigger_type=?,definition_json=?,updated_at=? WHERE id=?", params![trigger_type,json,changed_at.to_rfc3339(),workflow.id]).map_err(storage)?;
+                transaction.execute("INSERT INTO workflow_revisions(revision_id,workflow_id,parent_revision_id,schema_version,content_hash,definition_json,change_summary,created_at) VALUES(?,?,?,?,?,?,?,?)", params![revision_id,workflow.id,parent_revision_id,workflow.schema_version,content_hash,json,summarize_workflow_change(Some(&previous),&workflow),changed_at.to_rfc3339()]).map_err(storage)?;
+                transaction.execute("INSERT INTO workflow_revision_heads(workflow_id,revision_id) VALUES(?,?) ON CONFLICT(workflow_id) DO UPDATE SET revision_id=excluded.revision_id", params![workflow.id,revision_id]).map_err(storage)?;
+            }
+            let archived_at = archived.then(|| changed_at.to_rfc3339());
+            transaction.execute("INSERT INTO workflow_metadata(workflow_id,archived_at) VALUES(?,?) ON CONFLICT(workflow_id) DO UPDATE SET archived_at=excluded.archived_at", params![workflow.id,archived_at]).map_err(storage)?;
+        }
+        transaction.commit().map_err(storage)
     }
 
     pub fn get_workflow_metadata(&self, id: &str) -> Result<WorkflowMetadata, EngineError> {
@@ -1934,6 +1996,107 @@ fn decode_workflow(json: &str) -> Result<Workflow, EngineError> {
     migrate_workflow(serde_json::from_str(json).map_err(storage)?)
 }
 
+fn unique_workflow_ids(ids: &[String]) -> Result<Vec<String>, EngineError> {
+    let mut seen = std::collections::HashSet::new();
+    let ids = ids
+        .iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+        .collect::<Vec<_>>();
+    if ids.is_empty() {
+        return Err(EngineError::Storage("Choose at least one workflow.".into()));
+    }
+    if ids.len() > 500 {
+        return Err(EngineError::Storage(
+            "Bulk actions are limited to 500 workflows.".into(),
+        ));
+    }
+    Ok(ids)
+}
+
+fn workflow_metadata_from_row(
+    row: (i64, Option<String>, String, Option<String>, Option<String>),
+) -> WorkflowMetadata {
+    WorkflowMetadata {
+        favorite: row.0 != 0,
+        folder: row.1,
+        tags: serde_json::from_str(&row.2).unwrap_or_default(),
+        archived_at: row
+            .3
+            .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+            .map(|value| value.with_timezone(&Utc)),
+        last_opened_at: row
+            .4
+            .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+            .map(|value| value.with_timezone(&Utc)),
+    }
+}
+
+fn patched_workflow_metadata(
+    current: WorkflowMetadata,
+    patch: &WorkflowMetadataPatch,
+) -> Result<WorkflowMetadata, EngineError> {
+    let folder = match &patch.folder {
+        Some(value) => value
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        None => current.folder,
+    };
+    if folder
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 64)
+    {
+        return Err(EngineError::Storage(
+            "Folder names are limited to 64 characters.".into(),
+        ));
+    }
+    if patch.tags.is_some() && (patch.add_tags.is_some() || patch.remove_tags.is_some()) {
+        return Err(EngineError::Storage(
+            "Replace tags or add/remove tags, but do not do both at once.".into(),
+        ));
+    }
+    let mut tags = patch.tags.clone().unwrap_or(current.tags);
+    for value in patch.add_tags.clone().unwrap_or_default() {
+        let value = value.trim().to_string();
+        if !value.is_empty()
+            && !tags
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&value))
+        {
+            tags.push(value);
+        }
+    }
+    let removed = patch
+        .remove_tags
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| value.trim().to_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    tags.retain(|value| !removed.contains(&value.to_lowercase()));
+    let tags = tags
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if tags.len() > 10 || tags.iter().any(|value| value.chars().count() > 32) {
+        return Err(EngineError::Storage(
+            "Use at most 10 tags, each no longer than 32 characters.".into(),
+        ));
+    }
+    Ok(WorkflowMetadata {
+        favorite: patch.favorite.unwrap_or(current.favorite),
+        folder,
+        tags,
+        archived_at: patch.archived_at.clone().unwrap_or(current.archived_at),
+        last_opened_at: patch
+            .last_opened_at
+            .clone()
+            .unwrap_or(current.last_opened_at),
+    })
+}
+
 fn migrate_saved_workflows(connection: &Connection) -> Result<(), EngineError> {
     let rows: Vec<(String, String)> = {
         let mut statement = connection
@@ -2396,6 +2559,52 @@ mod tests {
         .unwrap();
         assert!(db.list_workflows().unwrap().is_empty());
         assert_eq!(db.list_workflows_including_archived(true).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn bulk_metadata_rejects_unknown_ids_before_changing_any_workflow() {
+        let db = Database::in_memory().unwrap();
+        db.save_workflow(workflow()).unwrap();
+        let result = db.batch_update_workflow_metadata(
+            &["w".into(), "missing".into()],
+            WorkflowMetadataPatch {
+                favorite: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(result.is_err());
+        assert!(!db.get_workflow_metadata("w").unwrap().favorite);
+    }
+
+    #[test]
+    fn bulk_archive_is_atomic_and_disables_active_schedules() {
+        let db = Database::in_memory().unwrap();
+        db.save_workflow(workflow()).unwrap();
+        let mut second = workflow();
+        second.id = "w-2".into();
+        second.name = "Second".into();
+        db.save_workflow(second).unwrap();
+
+        assert!(db
+            .set_workflows_archived(&["w".into(), "missing".into()], true)
+            .is_err());
+        assert!(db.get_workflow("w").unwrap().unwrap().enabled);
+        assert!(db
+            .get_workflow_metadata("w")
+            .unwrap()
+            .archived_at
+            .is_none());
+
+        db.set_workflows_archived(&["w".into(), "w-2".into()], true)
+            .unwrap();
+        for id in ["w", "w-2"] {
+            assert!(!db.get_workflow(id).unwrap().unwrap().enabled);
+            assert!(db
+                .get_workflow_metadata(id)
+                .unwrap()
+                .archived_at
+                .is_some());
+        }
     }
 
     #[test]

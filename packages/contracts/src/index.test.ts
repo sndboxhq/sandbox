@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRunnerCompatibility, hasPermission, RUNNER_PROTOCOL_VERSION, runnerCommandSchema, runnerHeartbeatSchema, type RunnerIdentity, type RunnerRequirements } from "./index.js";
+import { checkRunnerCompatibility, hasPermission, RUNNER_PROTOCOL_VERSION, runnerCommandSchema, runnerHeartbeatSchema, workspaceActivitySummarySchema, type RunnerIdentity, type RunnerRequirements } from "./index.js";
 
 describe("contracts", () => {
   it("uses explicit permission bundles", () => {
@@ -40,5 +40,19 @@ describe("contracts", () => {
     const base={runnerId:"11111111-1111-4111-8111-111111111111",keyId:"key",runnerType:"hosted" as const,protocolVersion:RUNNER_PROTOCOL_VERSION,engineVersion:"1",pluginRuntimeVersion:"1",architecture:"x86_64" as const,operatingSystem:"linux",workspaceId:"22222222-2222-4222-8222-222222222222",environmentId:"33333333-3333-4333-8333-333333333333",region:"eu",tags:[],concurrencyLimit:1,maintenanceState:"active" as const,nodeCapabilities:[{nodeType:"python_code",nodeVersions:[1],constraints:available}],plugins:[],connections:[]};
     const result=checkRunnerCompatibility(base,{protocolVersion:RUNNER_PROTOCOL_VERSION,engineVersion:"1",pluginRuntimeVersion:"1",runnerTypes:["hosted"],architectures:["x86_64"],workspaceId:base.workspaceId,environmentId:base.environmentId,region:"eu",requiredTags:[],capabilities:[{nodeType:"python_code",nodeVersions:[1],constraints:required}],plugins:[],connectionIds:[],minimumAvailableConcurrency:1});
     expect(result.compatible).toBe(false);expect(result.reasons).toEqual(expect.arrayContaining([expect.stringContaining("requires runtime python"),expect.stringContaining("requires runtime >=3.11")]));
+  });
+  it("validates additive workspace activity health counts and timestamps", () => {
+    const generatedAt = "2026-09-10T10:15:00.000Z";
+    const result = workspaceActivitySummarySchema.parse({
+      generatedAt,
+      runners: [],
+      runs: [],
+      pendingApprovalCount: 2,
+      webhookFailureCount: 1,
+      syncConflictCount: 3,
+    });
+    expect(result).toMatchObject({ generatedAt, pendingApprovalCount: 2, webhookFailureCount: 1, syncConflictCount: 3 });
+    expect(() => workspaceActivitySummarySchema.parse({ ...result, syncConflictCount: -1 })).toThrow();
+    expect(() => workspaceActivitySummarySchema.parse({ ...result, generatedAt: "yesterday" })).toThrow();
   });
 });
