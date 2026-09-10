@@ -158,6 +158,7 @@ function NavigationLink({
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const wordmark = pathname === "/legal" || pathname.startsWith("/legal/") ? "sndbox legal" : "sndbox";
   const headerRef = useRef<HTMLElement>(null);
   const menuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mobileButtonRef = useRef<HTMLButtonElement>(null);
@@ -306,7 +307,7 @@ export function SiteHeader() {
       <div className={styles.inner}>
         <Link className={styles.wordmark} href="/" aria-label="sndbox home">
           <SndboxMark className={styles.mark} size={32} />
-          <span>sndbox</span>
+          <span>{wordmark}</span>
         </Link>
 
         <nav className={styles.desktopNav} aria-label="Primary navigation" onMouseLeave={scheduleMenuClose}>
