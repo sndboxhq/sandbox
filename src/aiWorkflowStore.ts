@@ -49,9 +49,13 @@ const readableError = (value: unknown) => {
 export const blocksAiDraft = (issue: AiWorkflowProposal["issues"][number]) =>
   issue.code !== "incomplete_node" && (issue.severity === "error" || issue.code === "disconnected_node");
 
+export const isNewAiConversationCommand = (value: string) =>
+  ["/clear", "/new"].includes(value.trim().toLowerCase());
+
 interface AiWorkflowState {
   sessions: Record<string, AiWorkflowSession>;
   ensureSession: (workflow: Pick<Workflow, "id" | "name">) => void;
+  resetSession: (workflow: Pick<Workflow, "id" | "name">) => void;
   startBuild: (connectionId: string, text: string, workflow: Workflow) => Promise<void>;
   markApplied: (workflowId: string, messageId: string) => void;
   requestOpen: (workflowId: string) => void;
@@ -72,6 +76,9 @@ export const useAiWorkflowStore = create<AiWorkflowState>((set, get) => {
     ensureSession: (workflow) => set((state) => state.sessions[workflow.id]
       ? state
       : { sessions: { ...state.sessions, [workflow.id]: createAiWorkflowSession(workflow) } }),
+    resetSession: (workflow) => set((state) => ({
+      sessions: { ...state.sessions, [workflow.id]: createAiWorkflowSession(workflow) },
+    })),
     startBuild: async (connectionId, text, workflow) => {
       const request = text.trim();
       if (!request) return;

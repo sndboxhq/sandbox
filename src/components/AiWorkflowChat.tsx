@@ -1,7 +1,7 @@
 import { Bot, Check, Plus, Send, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { createAiWorkflowSession, useAiWorkflowStore } from "../aiWorkflowStore";
+import { createAiWorkflowSession, isNewAiConversationCommand, useAiWorkflowStore } from "../aiWorkflowStore";
 import type { AiWorkflowProposal, ConnectionMetadata, Workflow } from "../types";
 import { AiActivityStatus } from "./AiActivityStatus";
 import { AiConnectionDialog } from "./AiConnectionDialog";
@@ -41,6 +41,7 @@ export function AiWorkflowChat({
   const session = useAiWorkflowStore((state) => state.sessions[workflow.id]) ?? createAiWorkflowSession(workflow);
   const ensureSession = useAiWorkflowStore((state) => state.ensureSession);
   const startBuild = useAiWorkflowStore((state) => state.startBuild);
+  const resetSession = useAiWorkflowStore((state) => state.resetSession);
   const markApplied = useAiWorkflowStore((state) => state.markApplied);
   const busy = session.status === "building";
   const { activities, messages } = session;
@@ -72,7 +73,14 @@ export function AiWorkflowChat({
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || !connectionId || busy) return;
+    if (!text || busy) return;
+    if (isNewAiConversationCommand(text)) {
+      setDraft("");
+      resetSession(workflow);
+      window.requestAnimationFrame(() => composerRef.current?.focus());
+      return;
+    }
+    if (!connectionId) return;
     setDraft("");
     await startBuild(connectionId, text, workflow);
   };
@@ -175,7 +183,7 @@ export function AiWorkflowChat({
               }}
             />
             <div>
-              <small>AI drafts never run automatically.</small>
+              <small>Drafts never run automatically · /new or /clear resets chat</small>
               <button className="ai-send" disabled={!draft.trim() || busy} aria-label="Send message">
                 <Send size={14} />
               </button>
