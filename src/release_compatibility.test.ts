@@ -42,6 +42,7 @@ describe("v0.7.10 beta release compatibility", () => {
     }
     const tauriConfig = JSON.parse(read("src-tauri/tauri.conf.json"));
     expect(tauriConfig.version).toBe(releaseVersion);
+    expect(read("src/components/Sidebar.tsx")).toContain("sndbox <small>v{packageMetadata.version}</small>");
     expect(tauriConfig.bundle.targets).toEqual(["nsis"]);
     expect(tauriConfig.bundle.windows.nsis.installerIcon).toBe("icons/icon.ico");
     expect(tauriConfig.bundle.windows.nsis.uninstallerIcon).toBe("icons/icon.ico");
@@ -141,7 +142,10 @@ describe("v0.7.10 beta release compatibility", () => {
     expect(read("apps/web/Dockerfile")).not.toContain("COPY . .");
     expect(read("apps/marketing/Dockerfile")).toContain("COPY packages/product-ui packages/product-ui");
     expect(read("apps/web/Dockerfile")).toContain("COPY packages/product-ui packages/product-ui");
-    expect(read("apps/marketing/Dockerfile")).toContain("FROM deps AS api-client-build");
+    expect(read("apps/marketing/Dockerfile")).toContain("FROM deps AS contracts-build");
+    expect(read("apps/marketing/Dockerfile")).toContain("npm run build --workspace @sandbox/contracts");
+    expect(read("apps/web/Dockerfile")).toContain("FROM deps AS contracts-build");
+    expect(read("apps/web/Dockerfile")).toContain("npm run build --workspace @sandbox/contracts");
     expect(read("services/browser-worker/Dockerfile")).toContain("npm prune --omit=dev");
     expect(read("services/control-plane/Dockerfile")).toContain("npm ci --omit=dev");
     expect(read("services/control-plane/Dockerfile")).toContain("/source/services/control-plane/node_modules ./services/control-plane/node_modules");

@@ -38,17 +38,17 @@ describe("DesktopUpdateNotice", () => {
   it("names the available version and opens its installer download", async () => {
     render(<ToastProvider><DesktopUpdateNotice /></ToastProvider>);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download sndbox 0.7.4-beta.3" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download sndbox v0.7.4-beta.3" }));
 
     await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith(update.installerUrl));
-    expect(await screen.findByText("Opening sndbox 0.7.4-beta.3 download in your browser.")).toBeVisible();
+    expect(await screen.findByText("Opening sndbox v0.7.4-beta.3 download in your browser.")).toBeVisible();
   });
 
   it("opens the release page and reports the fallback when the direct download fails", async () => {
     mocks.openUrl.mockRejectedValueOnce(new Error("blocked")).mockResolvedValueOnce(undefined);
     render(<ToastProvider><DesktopUpdateNotice /></ToastProvider>);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download sndbox 0.7.4-beta.3" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download sndbox v0.7.4-beta.3" }));
 
     await waitFor(() => expect(mocks.openUrl).toHaveBeenNthCalledWith(2, update.releaseUrl));
     expect(await screen.findByRole("alert")).toHaveTextContent("opened the release page instead");
@@ -58,6 +58,6 @@ describe("DesktopUpdateNotice", () => {
     localStorage.setItem("sandbox.dismissed-update.0.7.4-beta.3", "1");
     render(<ToastProvider><DesktopUpdateNotice /></ToastProvider>);
 
-    expect(await screen.findByRole("button", { name: "Download sndbox 0.7.4-beta.3" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Download sndbox v0.7.4-beta.3" })).toBeVisible();
   });
 });

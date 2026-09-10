@@ -9,12 +9,17 @@ COPY apps/web/package.json apps/web/package.json
 COPY packages/api-client/package.json packages/api-client/package.json
 COPY packages/brand/package.json packages/brand/package.json
 COPY packages/content/package.json packages/content/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/product-ui/package.json packages/product-ui/package.json
 RUN --mount=type=cache,id=sandbox-account-npm,target=/root/.npm \
     npm ci --ignore-scripts --no-audit --no-fund --prefer-offline \
       --workspace @sandbox/web --include-workspace-root=false
 
-FROM deps AS api-client-build
+FROM deps AS contracts-build
+COPY packages/contracts packages/contracts
+RUN npm run build --workspace @sandbox/contracts
+
+FROM contracts-build AS api-client-build
 COPY packages/api-client packages/api-client
 RUN npm run build --workspace @sandbox/api-client
 

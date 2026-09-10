@@ -58,7 +58,8 @@ export function DesktopUpdateNotice({ collapsed = false }: { collapsed?: boolean
     const target = update.installerUrl ?? update.releaseUrl;
     try {
       await openUrl(target);
-      toast.push(update.installerUrl ? `Opening sndbox ${update.version} download in your browser.` : `Opening sndbox ${update.version} release details.`);
+      const versionLabel = formatVersionLabel(update.version);
+      toast.push(update.installerUrl ? `Opening sndbox ${versionLabel} download in your browser.` : `Opening sndbox ${versionLabel} release details.`);
     } catch {
       if (target !== update.releaseUrl) {
         try {
@@ -79,12 +80,17 @@ export function DesktopUpdateNotice({ collapsed = false }: { collapsed?: boolean
     setUpdate(undefined);
   };
 
-  const action = update.installerUrl ? `Download sndbox ${update.version}` : `View sndbox ${update.version}`;
+  const versionLabel = formatVersionLabel(update.version);
+  const action = update.installerUrl ? `Download sndbox ${versionLabel}` : `View sndbox ${versionLabel}`;
   if (collapsed) return <button className="desktop-update-collapsed" title={action} aria-label={action} disabled={opening} onClick={() => void openUpdate()}><Download size={15}/></button>;
   return <aside className="desktop-update-notice" aria-live="polite">
-    <button className="desktop-update-link" title={action} aria-label={action} disabled={opening} onClick={() => void openUpdate()}><Download size={14}/><span>{opening ? "Opening download…" : update.installerUrl ? `Download ${update.version}` : `View ${update.version}`}</span></button>
-    <button className="desktop-update-dismiss" aria-label={`Dismiss sndbox ${update.version} update`} title="Dismiss" onClick={dismiss}><X size={13}/></button>
+    <button className="desktop-update-link" title={action} aria-label={action} disabled={opening} onClick={() => void openUpdate()}><Download size={14}/><span>{opening ? "Opening download…" : update.installerUrl ? `Download ${versionLabel}` : `View ${versionLabel}`}</span></button>
+    <button className="desktop-update-dismiss" aria-label={`Dismiss sndbox ${versionLabel} update`} title="Dismiss" onClick={dismiss}><X size={13}/></button>
   </aside>;
+}
+
+function formatVersionLabel(version: string): string {
+  return `v${version.replace(/^v/, "")}`;
 }
 
 function dismissalKey(version: string) {

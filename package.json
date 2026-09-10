@@ -12,10 +12,10 @@
   ],
   "scripts": {
     "dev": "vite --config vite.config.ts",
-    "prebuild": "npm run contracts:build",
+    "prebuild": "npm run contracts:build && npm run api-client:build",
     "build": "tsc -b && vite build --config vite.config.ts",
     "preview": "vite preview",
-    "pretest": "npm run contracts:build",
+    "pretest": "npm run contracts:build && npm run api-client:build",
     "test": "vitest run --config vite.config.ts",
     "test:watch": "vitest --config vite.config.ts",
     "tauri": "tauri",
