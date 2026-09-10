@@ -11,8 +11,8 @@ const later=new Date(Date.now()+2_592_000_000).toISOString();
 const profile={accountId,email:"alex@northstar.io",displayName:"Alex Morgan",sessionId};
 const organisation={id:organisationId,name:"Northstar Ops",slug:"northstar-ops",role:"owner",createdAt:now,workspaces:[{id:workspaceId,organisationId,name:"Production",slug:"production",role:"owner",createdAt:now}]};
 let runners=[
-  {runnerId:"33333333-3333-4333-8333-333333333333",displayName:"Production EU-1",workspaceId,operatingSystem:"linux",architecture:"x86_64",applicationVersion:"0.7.8-beta.1",protocolVersion:1,status:"online",currentWorkload:2,tags:["production","eu-west"],pairedAt:now,lastSeenAt:now},
-  {runnerId:"44444444-4444-4444-8444-444444444444",displayName:"Backup ARM",workspaceId,operatingSystem:"linux",architecture:"aarch64",applicationVersion:"0.7.8-beta.1",protocolVersion:1,status:"offline",currentWorkload:0,tags:["backup"],pairedAt:now,lastSeenAt:null}
+  {runnerId:"33333333-3333-4333-8333-333333333333",displayName:"Production EU-1",workspaceId,operatingSystem:"linux",architecture:"x86_64",applicationVersion:"0.7.10-beta.1",protocolVersion:1,status:"online",currentWorkload:2,tags:["production","eu-west"],pairedAt:now,lastSeenAt:now},
+  {runnerId:"44444444-4444-4444-8444-444444444444",displayName:"Backup ARM",workspaceId,operatingSystem:"linux",architecture:"aarch64",applicationVersion:"0.7.10-beta.1",protocolVersion:1,status:"offline",currentWorkload:0,tags:["backup"],pairedAt:now,lastSeenAt:null}
 ];
 let tokens=[{id:"55555555-5555-4555-8555-555555555555",name:"CLI access",prefix:"sbx_dev",kind:"personal",scopes:["workflows.view"],organisationId,workspaceIds:[workspaceId],environmentIds:[],createdAt:now,expiresAt:later,lastUsedAt:now,revokedAt:null}];
 let walletBalanceMicros=12_450_000;
