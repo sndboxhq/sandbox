@@ -12,6 +12,7 @@ import { useAppStore } from "../store";
 import type { ExecutionRecord, Workflow, WorkflowSummary } from "../types";
 import { ToastProvider } from "./ui/Toast";
 import { Dashboard } from "./Dashboard";
+import { DASHBOARD_SAVED_VIEWS_KEY } from "../dashboardSavedViews";
 
 const workflow: Workflow = {
   id: "workflow-one",
@@ -67,6 +68,7 @@ describe("Dashboard interactions", () => {
   afterEach(cleanup);
   beforeEach(() => {
     vi.restoreAllMocks();
+    localStorage.clear();
     usePreferences.setState({ ...defaultPreferences });
     useAppStore.setState({
       view: "workflows",
@@ -149,5 +151,31 @@ describe("Dashboard interactions", () => {
         "Localhost Status Site",
       ),
     );
+  });
+
+  it("saves and applies a named workflow view", async () => {
+    render(<ToastProvider><Dashboard /></ToastProvider>);
+    await screen.findByText("Daily report");
+    fireEvent.change(screen.getByLabelText("Search workflows"), { target: { value: "daily" } });
+    fireEvent.keyDown(screen.getByLabelText("Saved workflow views"), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByText(/Save current view/));
+    fireEvent.change(screen.getByLabelText("View name"), { target: { value: "Daily work" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save view" }));
+    await waitFor(() => expect(localStorage.getItem(DASHBOARD_SAVED_VIEWS_KEY)).toContain("Daily work"));
+    fireEvent.change(screen.getByLabelText("Search workflows"), { target: { value: "other" } });
+    fireEvent.keyDown(screen.getByLabelText("Saved workflow views"), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByText("Daily work"));
+    expect(screen.getByLabelText("Search workflows")).toHaveValue("daily");
+  });
+
+  it("deletes a saved view with a single-use Undo action", async () => {
+    localStorage.setItem(DASHBOARD_SAVED_VIEWS_KEY, JSON.stringify({ version: 1, views: [{ id: "view-one", name: "Daily work", state: { search: "", workflowFilter: "all", folder: "", sortOrder: "modified" }, createdAt: 1, updatedAt: 1 }] }));
+    render(<ToastProvider><Dashboard /></ToastProvider>);
+    await screen.findByText("Daily report");
+    fireEvent.keyDown(screen.getByLabelText("Saved workflow views"), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByText(/Manage saved views/));
+    fireEvent.click(screen.getByLabelText("Delete Daily work"));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(localStorage.getItem(DASHBOARD_SAVED_VIEWS_KEY)).toContain("Daily work"));
   });
 });

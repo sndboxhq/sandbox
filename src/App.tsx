@@ -10,6 +10,9 @@ import { AsyncErrorBoundary } from "./components/ui/AsyncErrorBoundary";
 import { LoadingSkeleton } from "./components/ui/States";
 import { useToast } from "./components/ui/Toast";
 import { ConfirmDialog } from "./components/ui/Dialog";
+import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
+import { isTextEntryTarget, useKeyboardShortcuts } from "./useKeyboardShortcuts";
+import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "./workspaceState";
 import "./plugins.css";
 
 const Dashboard = lazy(() =>
@@ -58,8 +61,10 @@ export default function App() {
   useApplyPreferences();
   const { view, activeWorkflow, setView } = useAppStore();
   const startView = usePreferences((state) => state.startView);
+  const restoreLastWorkspace = usePreferences((state) => state.restoreLastWorkspace);
   const initialViewApplied = useRef(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [approvalPrompt, setApprovalPrompt] = useState<PendingApproval>();
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [deepLinks, setDeepLinks] = useState<string[]>([]);
@@ -74,16 +79,32 @@ export default function App() {
     if (startView !== "workflows") setView(startView);
   }, [setView, startView]);
   useEffect(() => {
-    const key = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        if (view === "editor")
-          window.dispatchEvent(new CustomEvent("sandbox:open-node-picker"));
-        else setCommandOpen((value) => !value);
+    if (!restoreLastWorkspace) return;
+    const snapshot = readWorkspaceSnapshot();
+    if (!snapshot) return;
+    if (snapshot.view !== "editor") { setView(snapshot.view); return; }
+    if (!snapshot.workflowId) return;
+    void api.listWorkflows(true).then(async (items) => {
+      const item = items.find((candidate) => candidate.workflow.id === snapshot.workflowId);
+      if (!item || item.metadata.archivedAt) {
+        updateWorkspaceSnapshot(current => ({ ...current, workflowId: undefined }));
+        return;
       }
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
+      await useAppStore.getState().openWorkflow(snapshot.workflowId!);
+    }).catch(() => updateWorkspaceSnapshot(current => ({ ...current, workflowId: undefined })));
+  }, [restoreLastWorkspace, setView]);
+  useEffect(() => {
+    updateWorkspaceSnapshot(current => ({ ...current, view, workflowId: view === "editor" ? activeWorkflow?.id : undefined }));
+  }, [view, activeWorkflow?.id]);
+  useKeyboardShortcuts((event) => {
+    if (event.target instanceof Element && event.target.closest("[role=dialog],[role=alertdialog]")) return;
+    if (isTextEntryTarget(event.target)) return;
+    if (event.key === "?" && !event.ctrlKey && !event.metaKey) { event.preventDefault(); setShortcutsOpen(true); return; }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if (view === "editor") window.dispatchEvent(new CustomEvent("sandbox:open-node-picker"));
+        else setCommandOpen((value) => !value);
+    }
   }, [view]);
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
@@ -212,6 +233,13 @@ export default function App() {
         }}
         actions={[
           {
+            id: "keyboard-shortcuts",
+            name: "Keyboard shortcuts",
+            description: "View available keyboard commands.",
+            group: "Help",
+            action: () => setShortcutsOpen(true),
+          },
+          {
             id: "import-workflow",
             name: "Import workflow",
             description: "Choose a sndbox workflow file from this device.",
@@ -276,6 +304,7 @@ export default function App() {
             })),
         ]}
       />
+      <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} editor={view === "editor"} />
       {approvalPrompt && (
         <Suspense fallback={null}>
           <ApprovalRequest

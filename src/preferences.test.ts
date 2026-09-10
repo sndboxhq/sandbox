@@ -22,7 +22,13 @@ describe("app preferences", () => {
       updateChannel: "beta",
       showAskAiOnNodeInteraction: true,
       showAskAiOnNodeIssues: true,
+      restoreLastWorkspace: false,
     });
+  });
+
+  it("retains only boolean workspace restore preferences", () => {
+    expect(normalisePreferences({ restoreLastWorkspace: true }).restoreLastWorkspace).toBe(true);
+    expect(normalisePreferences({ restoreLastWorkspace: "yes" }).restoreLastWorkspace).toBe(false);
   });
 
   it("preserves Ask AI node shortcut preferences", () => {
