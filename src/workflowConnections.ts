@@ -1,5 +1,5 @@
 import type { Connection } from "@xyflow/react";
-import { isTrigger } from "./catalogue";
+import { isAnnotation, isTrigger } from "./catalogue";
 import type { Workflow, WorkflowEdge, WorkflowNode } from "./types";
 
 export const WEB_BUILDER_INPUT_PORTS = [
@@ -53,7 +53,7 @@ export function isValidWorkflowConnection(
 
   const source = workflow.nodes.find((node) => node.id === connection.source);
   const target = workflow.nodes.find((node) => node.id === connection.target);
-  if (!source || !target || isTrigger(target.type)) return false;
+  if (!source || !target || isTrigger(target.type) || isAnnotation(source.type) || isAnnotation(target.type)) return false;
 
   const sourceHandle = connection.sourceHandle ?? "output";
   const targetHandle = connection.targetHandle ?? "input";

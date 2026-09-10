@@ -14,7 +14,7 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   showAskAiOnInteraction: boolean;
   showAskAiOnIssues: boolean;
   onAskAi: (node: WorkflowNode, issue?: string) => void;
-  onAdd: (sourceId: string) => void;
+  onAdd?: (sourceId: string) => void;
   connectionRole?: "input" | "output" | "both";
   dimmed?: boolean;
   itemCount?: number;
@@ -36,6 +36,7 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
     itemCount,
   } = data as WorkflowNodeData;
   const definition = definitionFor(node.type);
+  const annotation = node.type === "note";
   const inputPorts = node.type === "web_builder"
     ? [...WEB_BUILDER_INPUT_PORTS]
     : node.type === "merge"
@@ -57,6 +58,8 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
         warningTone={warningTone}
         trigger={isTrigger(node.type)}
         condition={node.type === "condition"}
+        annotation={annotation}
+        standalone={annotation}
         inputCount={inputPorts?.length ?? definition.inputs.length}
         inputPorts={inputPorts}
         outputLabels={outputPorts?.map(port=>port.label) ?? definition.outputs.map((port) => port.label)}

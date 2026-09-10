@@ -124,6 +124,17 @@ pub fn validate(workflow: &Workflow) -> Vec<ValidationIssue> {
                 Some(edge.id.clone()),
             ));
         }
+        if workflow.nodes.iter().any(|node| {
+            node.node_type == "note"
+                && (node.id == edge.source_node_id || node.id == edge.target_node_id)
+        }) {
+            issues.push(issue(
+                "note_connection",
+                "Notes are canvas-only and cannot be connected to workflow steps.",
+                None,
+                Some(edge.id.clone()),
+            ));
+        }
         if let Some(source) = workflow.nodes.iter().find(|n| n.id == edge.source_node_id) {
             if source.node_type == "condition"
                 && !matches!(edge.source_handle.as_str(), "true" | "false")
@@ -235,7 +246,7 @@ pub fn validate(workflow: &Workflow) -> Vec<ValidationIssue> {
         for node in workflow
             .nodes
             .iter()
-            .filter(|n| !n.disabled && !reachable.contains(n.id.as_str()))
+            .filter(|n| n.node_type != "note" && !n.disabled && !reachable.contains(n.id.as_str()))
         {
             let mut disconnected = issue(
                 "disconnected_node",
@@ -250,6 +261,9 @@ pub fn validate(workflow: &Workflow) -> Vec<ValidationIssue> {
         }
     }
     for node in &workflow.nodes {
+        if node.node_type == "note" {
+            continue;
+        }
         validate_collection_node(workflow, node, &mut issues);
         let reachable_sources = upstream_node_ids(workflow, &node.id);
         for (field_path, source) in expression_strings(&node.configuration, "configuration") {
@@ -1358,6 +1372,30 @@ mod tests {
         assert!(validate(&workflow(vec![("a", "b")]))
             .iter()
             .any(|i| i.code == "disconnected_node"));
+    }
+
+    #[test]
+    fn allows_unconnected_notes_but_rejects_note_edges() {
+        let mut annotated = workflow(vec![("a", "b")]);
+        annotated.nodes[2].node_type = "note".into();
+        annotated.nodes[2].configuration = json!({"content":"Choose a connection."});
+        assert!(!validate(&annotated)
+            .iter()
+            .any(|issue| issue.code == "disconnected_node" && issue.node_id.as_deref() == Some("c")));
+
+        annotated.edges.push(WorkflowEdge {
+            id: "note-edge".into(),
+            source_node_id: "a".into(),
+            source_handle: "output".into(),
+            target_node_id: "c".into(),
+            target_handle: "input".into(),
+            kind: "control".into(),
+            source_port: Some("output".into()),
+            target_port: Some("input".into()),
+        });
+        assert!(validate(&annotated)
+            .iter()
+            .any(|issue| issue.code == "note_connection"));
     }
     #[test]
     fn validates_collection_graph_shapes_and_rules() {

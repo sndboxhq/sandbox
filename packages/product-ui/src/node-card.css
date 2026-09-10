@@ -12,6 +12,13 @@
 }
 
 .node-card:hover { border-color: var(--border-strong, #46464e); }
+.node-card.node-card-annotation {
+  border-color: rgba(216, 170, 94, .55);
+  background: color-mix(in srgb, var(--surface-raised, #151518) 82%, #d8aa5e 18%);
+}
+.node-card.node-card-annotation .node-icon { color: var(--warning, #d8aa5e); }
+.node-card.node-card-annotation .node-state { display: none; }
+.node-card.node-card-annotation .node-data-contract { color: var(--warning, #d8aa5e); }
 .node-card.selected,
 .node-card.node-running {
   border-color: var(--accent, #d6ff4b);

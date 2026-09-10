@@ -1,12 +1,13 @@
 import { Bell, Blocks, Bot, Braces, Camera, Clock3, Code2, Copy, Database, Download, FileClock, FileInput, FileJson, FileOutput, FilePlus2, FileText, FolderOpen, GitBranch, GitCompare, Globe2, Hand, Keyboard, LayoutTemplate, ListTree, LogIn, Mail, MailPlus, MessageSquare, MousePointerClick, Navigation, ScanSearch, Send, ShieldQuestion, TableProperties, Tag, Trash2, Upload, X, type LucideIcon } from "lucide-react";
 import type { BuiltInNodeType, InstalledPlugin, NodePortDefinition, NodeType, PluginManifestNode, WorkflowNode } from "./types";
 
-export type NodeGroup = "Triggers" | "Logic" | "Data" | "Browser" | "Network" | "Communication" | "System" | "Plugins";
+export type NodeGroup = "Notes" | "Triggers" | "Logic" | "Data" | "Browser" | "Network" | "Communication" | "System" | "Plugins";
 export type NodePlacement="local"|"paired_runner"|"hosted_runner"|"managed_browser";
 export interface NodeDefinition { type:NodeType; name:string; description:string; group:NodeGroup; icon:LucideIcon; defaults:Record<string,unknown>; summary:(config:Record<string,unknown>)=>string; inputs:NodePortDefinition[]; outputs:NodePortDefinition[]; sideEffect:boolean; placements:NodePlacement[]; configurationSchema?:Record<string,unknown>; connectionRequirements?:PluginManifestNode["connectionRequirements"]; fileInputs?:PluginManifestNode["fileInputs"]; externalEffect?:PluginManifestNode["externalEffect"] }
 type NodeDefinitionInput=Omit<NodeDefinition,"inputs"|"outputs"|"sideEffect"|"placements">&Partial<Pick<NodeDefinition,"inputs"|"outputs"|"sideEffect"|"placements">>;
 export interface PluginNodeChoice { plugin:InstalledPlugin; node:PluginManifestNode }
 const BASE_NODE_DEFINITIONS:NodeDefinitionInput[] = [
+  {type:"note",name:"Note",description:"Place setup instructions or context on the canvas",group:"Notes",icon:FileText,defaults:{content:"Add instructions, assumptions, or setup details here."},summary:c=>String(c.content??"").trim().split("\n")[0]?.slice(0,80)||"Add instructions",inputs:[],outputs:[],sideEffect:false},
   {type:"manual_trigger",name:"Manual Trigger",description:"Run from the toolbar",group:"Triggers",icon:Hand,defaults:{},summary:()=>"Starts on demand"},
   {type:"schedule_trigger",name:"Schedule Trigger",description:"Run on a local schedule",group:"Triggers",icon:Clock3,defaults:{scheduleType:"minutes",every:15,time:"09:00",cron:"0 */15 * * *"},summary:c=>c.scheduleType==="minutes"?`Every ${c.every ?? 15} minutes`:c.scheduleType==="daily"?`Daily at ${c.time ?? "09:00"}`:c.scheduleType==="hourly"?"Every hour":String(c.cron ?? "Advanced schedule")},
   {type:"file_watch_trigger",name:"File Watch Trigger",description:"Watch an approved folder",group:"Triggers",icon:FileClock,defaults:{folder:"",events:["created"],pattern:""},summary:c=>c.folder?`Watch ${String(c.folder).split(/[\\/]/).pop()}`:"Choose a folder"},
@@ -124,6 +125,7 @@ export const enabledPluginNodes=(plugins:InstalledPlugin[]):PluginNodeChoice[]=>
   return{plugin,node};
 }));
 export const isTrigger=(type:NodeType)=>["manual_trigger","schedule_trigger","file_watch_trigger","gmail_new_email_trigger"].includes(type)||PLUGIN_TRIGGERS.has(type);
+export const isAnnotation=(type:NodeType)=>type==="note";
 const locatorSummary=(config:Record<string,unknown>,fallback:string)=>{const locator=config.locator as {accessibleName?:string;primary?:{name?:string;value?:string}}|undefined;return locator?.accessibleName||locator?.primary?.name||locator?.primary?.value||fallback};
 function defaultsFromSchema(schema:Record<string,unknown>):Record<string,unknown>{
   if(schema.default&&typeof schema.default==="object"&&!Array.isArray(schema.default))return structuredClone(schema.default as Record<string,unknown>);

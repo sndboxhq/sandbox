@@ -81,6 +81,22 @@ describe("Web Builder graph inputs", () => {
     expect(isValidWorkflowConnection(current, { source: "trigger", target: "site", sourceHandle: "output", targetHandle: "html" })).toBe(false);
   });
 
+  it("keeps canvas notes outside the executable graph", () => {
+    const current = workflow();
+    current.nodes.push({
+      id: "instructions",
+      type: "note",
+      version: 1,
+      name: "Setup",
+      position: { x: 20, y: 320 },
+      configuration: { content: "Choose a URL before running." },
+      disabled: false,
+    });
+
+    expect(isValidWorkflowConnection(current, { source: "trigger", target: "instructions" })).toBe(false);
+    expect(isValidWorkflowConnection(current, { source: "instructions", target: "html" })).toBe(false);
+  });
+
   it("creates the visual dependency edge and code output binding together", () => {
     const next = connectWorkflowNodes(workflow(), { source: "js", target: "site", sourceHandle: "output", targetHandle: "javascript" })!;
     expect(next.edges[0]).toMatchObject({

@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { CommandPalette } from "./components/CommandPalette";
 import { Sidebar } from "./components/Sidebar";
 import { api } from "./api";
 import type { PendingApproval, PluginPackageInspection } from "./types";
@@ -18,6 +17,11 @@ import "./plugins.css";
 const Dashboard = lazy(() =>
   import("./components/Dashboard").then((module) => ({
     default: module.Dashboard,
+  })),
+);
+const CommandPalette = lazy(() =>
+  import("./components/CommandPalette").then((module) => ({
+    default: module.CommandPalette,
   })),
 );
 const HistoryView = lazy(() =>
@@ -226,7 +230,7 @@ export default function App() {
         </AsyncErrorBoundary>
       </div>
       <Suspense fallback={null}><ActiveAiTabs /></Suspense>
-      <CommandPalette
+      <Suspense fallback={null}><CommandPalette
         open={commandOpen}
         onClose={() => setCommandOpen(false)}
         onCreate={() => {
@@ -309,7 +313,7 @@ export default function App() {
                 void useAppStore.getState().openWorkflow(item.workflow.id),
             })),
         ]}
-      />
+      /></Suspense>
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} editor={view === "editor"} />
       {approvalPrompt && (
         <Suspense fallback={null}>

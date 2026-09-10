@@ -291,6 +291,17 @@ export function NodeInspector({
           />
         </Field>
 
+        {node.type === "note" && (
+          <Field label="Instructions" hint="Visible on the canvas only; this note is not executed or connected.">
+            <textarea
+              rows={10}
+              value={String(config.content ?? "")}
+              onChange={(event) => set("content", event.target.value)}
+              placeholder="Add setup steps, assumptions, or details someone should review before running this workflow."
+            />
+          </Field>
+        )}
+
         {definition.inputs.length > 0 && (
           <DataBindings
             definition={definition}

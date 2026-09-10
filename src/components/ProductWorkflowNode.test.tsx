@@ -28,4 +28,24 @@ describe("ProductWorkflowNode named inputs", () => {
     expect(screen.getByLabelText("JS input")).toBeInTheDocument();
     expect(screen.getByLabelText("CSS input")).toBeInTheDocument();
   });
+
+  it("renders annotations without executable connection handles", () => {
+    const { container } = render(
+      <ReactFlowProvider>
+        <ProductWorkflowNode
+          id="setup"
+          name="Before running"
+          summary="Choose a connection"
+          icon={Code2}
+          inputCount={0}
+          outputLabels={[]}
+          standalone
+          annotation
+        />
+      </ReactFlowProvider>,
+    );
+
+    expect(screen.getByLabelText("Canvas note; not executed")).toBeInTheDocument();
+    expect(container.querySelector(".react-flow__handle")).not.toBeInTheDocument();
+  });
 });

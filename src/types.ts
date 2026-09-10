@@ -1,4 +1,5 @@
 export type BuiltInNodeType =
+  | "note"
   | "manual_trigger" | "schedule_trigger" | "file_watch_trigger" | "condition" | "filter" | "switch" | "loop_over_items" | "split_out" | "aggregate" | "merge" | "remove_duplicates" | "set_data" | "delay"
   | "http_request" | "desktop_notification" | "move_file" | "read_file" | "write_file" | "copy_path" | "delete_path" | "list_folder" | "parse_csv" | "parse_json" | "parse_text" | "get_workflow_state" | "set_workflow_state" | "compare_previous" | "run_command"
   | "ai_prompt" | "code" | "javascript_code" | "python_code" | "web_builder"

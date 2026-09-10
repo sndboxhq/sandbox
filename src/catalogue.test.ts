@@ -3,6 +3,20 @@ import { createNode, createPluginNode, definitionFor, enabledPluginNodes, NODE_D
 import type { InstalledPlugin } from "./types";
 
 describe("stage two node catalogue", () => {
+  it("provides a standalone note for canvas instructions", () => {
+    const note = createNode("note", { x: 40, y: 80 });
+    expect(note).toMatchObject({
+      type: "note",
+      configuration: { content: expect.any(String) },
+    });
+    expect(definitionFor("note")).toMatchObject({
+      group: "Notes",
+      inputs: [],
+      outputs: [],
+      sideEffect: false,
+    });
+  });
+
   it("ships every collection node with stable routing defaults", () => {
     const types = new Set(NODE_DEFINITIONS.map(definition => definition.type));
     for (const type of ["filter", "switch", "loop_over_items", "split_out", "aggregate", "merge", "remove_duplicates"] as const) {

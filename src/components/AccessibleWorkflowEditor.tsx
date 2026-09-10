@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { isTrigger } from "../catalogue";
+import { isAnnotation, isTrigger } from "../catalogue";
 import type { Workflow } from "../types";
 import {
   connectWorkflowNodes,
@@ -19,18 +19,19 @@ export function AccessibleWorkflowEditor({ workflow, selectedNodeId, onChange, o
   onSelect: (nodeId: string) => void;
   onAddNode: () => void;
 }) {
-  const [sourceId, setSourceId] = useState(workflow.nodes[0]?.id ?? "");
+  const [sourceId, setSourceId] = useState(workflow.nodes.find(node=>!isAnnotation(node.type))?.id ?? "");
   const [targetId, setTargetId] = useState("");
   const [sourceHandle, setSourceHandle] = useState("output");
   const [targetHandle, setTargetHandle] = useState("input");
   const source = workflow.nodes.find(node => node.id === sourceId);
-  const targets = workflow.nodes.filter(node => node.id !== sourceId && !isTrigger(node.type));
+  const connectionNodes = workflow.nodes.filter(node=>!isAnnotation(node.type));
+  const targets = connectionNodes.filter(node => node.id !== sourceId && !isTrigger(node.type));
   const target = workflow.nodes.find(node => node.id === targetId);
   const sourcePorts=accessibleSourcePorts(source);
   const targetPorts=accessibleTargetPorts(target);
 
   useEffect(() => {
-    if (!workflow.nodes.some(node => node.id === sourceId)) setSourceId(workflow.nodes[0]?.id ?? "");
+    if (!connectionNodes.some(node => node.id === sourceId)) setSourceId(connectionNodes[0]?.id ?? "");
   }, [sourceId, workflow.nodes]);
 
   useEffect(() => {
@@ -95,7 +96,7 @@ export function AccessibleWorkflowEditor({ workflow, selectedNodeId, onChange, o
     <section aria-labelledby="accessible-connect-title">
       <h3 id="accessible-connect-title">Add connection</h3>
       <div className="accessible-connection-form">
-        <label htmlFor="accessible-source">From</label><CustomSelect id="accessible-source" value={sourceId} onChange={event => setSourceId(event.target.value)}>{workflow.nodes.map(node => <option value={node.id} key={node.id}>{node.name}</option>)}</CustomSelect>
+        <label htmlFor="accessible-source">From</label><CustomSelect id="accessible-source" value={sourceId} onChange={event => setSourceId(event.target.value)}>{connectionNodes.map(node => <option value={node.id} key={node.id}>{node.name}</option>)}</CustomSelect>
         {sourcePorts.length>1 && <><label htmlFor="accessible-branch">Branch</label><CustomSelect id="accessible-branch" value={sourceHandle} onChange={event => setSourceHandle(event.target.value)}>{sourcePorts.map(port=><option value={port.id} key={port.id}>{port.label}</option>)}</CustomSelect></>}
         <label htmlFor="accessible-target">To</label><CustomSelect id="accessible-target" value={targetId} onChange={event => setTargetId(event.target.value)} disabled={!targets.length}>{targets.map(node => <option value={node.id} key={node.id}>{node.name}</option>)}</CustomSelect>
         {targetPorts.length>0 && <><label htmlFor="accessible-target-input">Input</label><CustomSelect id="accessible-target-input" value={targetHandle} onChange={event => setTargetHandle(event.target.value)}>{targetPorts.map(port => <option value={port.id} key={port.id}>{port.label}</option>)}</CustomSelect></>}

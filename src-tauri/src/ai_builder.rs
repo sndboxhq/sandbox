@@ -17,6 +17,7 @@ type Result<T> = std::result::Result<T, String>;
 const MAX_AI_BUILD_ATTEMPTS: usize = 3;
 
 const SUPPORTED_NODES: &[&str] = &[
+    "note",
     "manual_trigger",
     "schedule_trigger",
     "file_watch_trigger",
@@ -935,6 +936,7 @@ fn graph_to_proposal(graph: AiGraph, current: Workflow) -> Result<AiWorkflowProp
 
     apply_configuration_defaults(&mut graph);
     normalize_web_builder_connections(&mut graph);
+    normalize_workflow_connections(&mut graph, &trigger_key);
 
     let ids: HashMap<String, String> = graph
         .nodes
@@ -1117,6 +1119,7 @@ fn graph_to_proposal(graph: AiGraph, current: Workflow) -> Result<AiWorkflowProp
 fn apply_configuration_defaults(graph: &mut AiGraph) {
     for node in &mut graph.nodes {
         let defaults = match node.node_type.as_str() {
+            "note" => json!({"content":""}),
             "schedule_trigger" => {
                 json!({"scheduleType":"minutes","every":15,"time":"09:00","cron":"0 */15 * * *"})
             }
@@ -1169,6 +1172,97 @@ fn apply_configuration_defaults(graph: &mut AiGraph) {
             configuration
                 .entry(key.clone())
                 .or_insert_with(|| value.clone());
+        }
+    }
+}
+
+/// Restore control-flow edges that models sometimes omit. Data bindings imply
+/// execution order, and every remaining disconnected component gets a safe
+/// entry edge from the trigger. Notes are canvas-only and stay unconnected.
+fn normalize_workflow_connections(graph: &mut AiGraph, trigger_key: &str) {
+    let node_types: HashMap<String, String> = graph
+        .nodes
+        .iter()
+        .map(|node| (node.key.clone(), node.node_type.clone()))
+        .collect();
+
+    graph.edges.retain(|edge| {
+        node_types.get(&edge.source).map(String::as_str) != Some("note")
+            && node_types.get(&edge.target).map(String::as_str) != Some("note")
+    });
+
+    let mut connected_pairs: HashSet<(String, String)> = graph
+        .edges
+        .iter()
+        .map(|edge| (edge.source.clone(), edge.target.clone()))
+        .collect();
+    let mut inferred = Vec::new();
+    for target in &graph.nodes {
+        if matches!(target.node_type.as_str(), "note" | "web_builder") {
+            continue;
+        }
+        for binding in target.input_bindings.values() {
+            let Some(source_type) = node_types.get(&binding.source).map(String::as_str) else {
+                continue;
+            };
+            if source_type == "note" || source_type == "condition" {
+                continue;
+            }
+            if connected_pairs.insert((binding.source.clone(), target.key.clone())) {
+                inferred.push(AiEdge {
+                    source: binding.source.clone(),
+                    target: target.key.clone(),
+                    source_handle: "output".into(),
+                    target_handle: "input".into(),
+                });
+            }
+        }
+    }
+    graph.edges.extend(inferred);
+
+    let mut reachable = HashSet::from([trigger_key.to_string()]);
+    loop {
+        let before = reachable.len();
+        for edge in &graph.edges {
+            if reachable.contains(&edge.source) {
+                reachable.insert(edge.target.clone());
+            }
+        }
+        if reachable.len() == before {
+            break;
+        }
+    }
+
+    let unreachable: HashSet<String> = graph
+        .nodes
+        .iter()
+        .filter(|node| node.node_type != "note" && !reachable.contains(&node.key))
+        .map(|node| node.key.clone())
+        .collect();
+    let component_roots: Vec<String> = graph
+        .nodes
+        .iter()
+        .filter(|node| {
+            unreachable.contains(&node.key)
+                && node.node_type != "web_builder"
+                && !node.input_bindings.values().any(|binding| {
+                    node_types.get(&binding.source).map(String::as_str) == Some("condition")
+                })
+                && !graph
+                    .edges
+                    .iter()
+                    .any(|edge| edge.target == node.key && unreachable.contains(&edge.source))
+        })
+        .map(|node| node.key.clone())
+        .collect();
+    for root in component_roots {
+        if connected_pairs.insert((trigger_key.to_string(), root.clone())) {
+            graph.edges.push(AiEdge {
+                source: trigger_key.to_string(),
+                target: root,
+                source_handle: "output".into(),
+                target_handle: "input".into(),
+            });
         }
     }
 }
@@ -1273,7 +1367,7 @@ fn normalize_web_builder_connections(graph: &mut AiGraph) {
 
 fn system_prompt() -> String {
     format!(
-        "You are the workflow builder inside sndbox. Convert the user's request into a complete visual workflow graph using the application's nodes, not by pretending that one code block performs the whole workflow. Return JSON only, with this exact shape: {{\"reply\":\"brief explanation\",\"name\":\"optional workflow name\",\"description\":\"optional description\",\"nodes\":[{{\"key\":\"stable_local_key\",\"type\":\"node_type\",\"name\":\"label\",\"configuration\":{{}},\"inputBindings\":{{\"targetField\":{{\"source\":\"upstream_key\",\"output\":\"output_key\"}}}},\"disabled\":false}}],\"edges\":[{{\"source\":\"key\",\"target\":\"key\",\"sourceHandle\":\"output\",\"targetHandle\":\"input\"}}]}}. Output the complete replacement graph, including unchanged nodes when editing. Use exactly one trigger and make every enabled node reachable from it. Condition branches use sourceHandle true or false. Filter and Split Out use output or rejected; Remove Duplicates uses output or duplicates. Bind data between nodes with inputBindings and the upstream output key. Important capabilities: schedule_trigger runs recurring checks; http_request performs HTTP calls and outputs status, body, and finalUrl; condition branches on values; get_workflow_state, set_workflow_state, and compare_previous persist and compare results; desktop_notification and communication nodes alert users; JavaScript Code and Python Code transform workflow data; legacy Code nodes author HTML, browser JavaScript, or CSS source; Web Builder renders a localhost interface. HTTP checks, state, conditions, and alerts must be real workflow nodes rather than browser-side fetch code when the user asks for monitoring. Code nodes use configuration {{\"language\":\"python|html|javascript|css\",\"sourceCode\":\"complete working source\",\"executionMode\":\"source|run\"}}. When the user asks for an interface, write complete HTML, JavaScript, and CSS source in three Code nodes. Web Builder accepts only those three matching Code outputs: map code to html, javascript, and css with inputBindings and create one matching edge per input. Never connect HTTP, condition, state, trigger, or notification nodes directly to Web Builder. Keep the monitoring flow as its own node branch and the interface as a Code/Web Builder branch, with both branches connected to the trigger. All non-Web-Builder edges use targetHandle input. Never leave requested code blocks empty. Never invent node types, credentials, API keys, file paths, selectors, addresses, or personal data; leave unknown external configuration values empty so the user can review them. Keep side-effecting actions disabled when intent is ambiguous. Supported node types: {}.",
+        "You are the workflow builder inside sndbox. Convert the user's request into a complete visual workflow graph using the application's nodes, not by pretending that one code block performs the whole workflow. Return JSON only, with this exact shape: {{\"reply\":\"brief explanation\",\"name\":\"optional workflow name\",\"description\":\"optional description\",\"nodes\":[{{\"key\":\"stable_local_key\",\"type\":\"node_type\",\"name\":\"label\",\"configuration\":{{}},\"inputBindings\":{{\"targetField\":{{\"source\":\"upstream_key\",\"output\":\"output_key\"}}}},\"disabled\":false}}],\"edges\":[{{\"source\":\"key\",\"target\":\"key\",\"sourceHandle\":\"output\",\"targetHandle\":\"input\"}}]}}. Output the complete replacement graph, including unchanged nodes when editing. Use exactly one trigger and make every enabled executable node reachable from it. The note node is the only exception: it is a canvas-only annotation with configuration {{\"content\":\"clear instructions\"}}, must have no edges or bindings, and is never executed. Add a note when the workflow needs setup steps, missing credentials or values, assumptions, or manual review instructions; never use a note in place of executable behaviour. Condition branches use sourceHandle true or false. Filter and Split Out use output or rejected; Remove Duplicates uses output or duplicates. Bind data between nodes with inputBindings and the upstream output key, and always add the matching control-flow edge so the source runs before the target. Important capabilities: schedule_trigger runs recurring checks; http_request performs HTTP calls and outputs status, body, and finalUrl; condition branches on values; get_workflow_state, set_workflow_state, and compare_previous persist and compare results; desktop_notification and communication nodes alert users; JavaScript Code and Python Code transform workflow data; legacy Code nodes author HTML, browser JavaScript, or CSS source; Web Builder renders a localhost interface. HTTP checks, state, conditions, and alerts must be real workflow nodes rather than browser-side fetch code when the user asks for monitoring. Code nodes use configuration {{\"language\":\"python|html|javascript|css\",\"sourceCode\":\"complete working source\",\"executionMode\":\"source|run\"}}. When the user asks for an interface, write complete HTML, JavaScript, and CSS source in three Code nodes. Web Builder accepts only those three matching Code outputs: map code to html, javascript, and css with inputBindings and create one matching edge per input. Never connect HTTP, condition, state, trigger, or notification nodes directly to Web Builder. Keep the monitoring flow as its own node branch and the interface as a Code/Web Builder branch, with both branches connected to the trigger. All non-Web-Builder edges use targetHandle input. Never leave requested code blocks empty. Never invent node types, credentials, API keys, file paths, selectors, addresses, or personal data; leave unknown external configuration values empty and explain exactly what the user must provide in a note. Keep side-effecting actions disabled when intent is ambiguous. Supported node types: {}.",
         SUPPORTED_NODES.join(", ")
     )
 }
@@ -1458,6 +1552,97 @@ mod tests {
             proposal.workflow.trigger_node_id,
             proposal.workflow.nodes[0].id
         );
+    }
+
+    #[test]
+    fn repairs_missing_execution_edges_and_leaves_notes_unconnected() {
+        let current = crate::templates::blank(Some("Original".into()));
+        let graph = AiGraph {
+            reply: "Drafted it.".into(),
+            name: None,
+            description: None,
+            nodes: vec![
+                AiNode {
+                    key: "start".into(),
+                    node_type: "manual_trigger".into(),
+                    name: None,
+                    configuration: json!({}),
+                    disabled: false,
+                    input_bindings: BTreeMap::new(),
+                },
+                AiNode {
+                    key: "data".into(),
+                    node_type: "set_data".into(),
+                    name: Some("Prepare message".into()),
+                    configuration: json!({"values":{"message":"Ready"}}),
+                    disabled: false,
+                    input_bindings: BTreeMap::new(),
+                },
+                AiNode {
+                    key: "notify".into(),
+                    node_type: "desktop_notification".into(),
+                    name: None,
+                    configuration: json!({"title":"Finished","message":""}),
+                    disabled: false,
+                    input_bindings: BTreeMap::from([(
+                        "message".into(),
+                        AiBinding {
+                            source: "data".into(),
+                            output: "value".into(),
+                        },
+                    )]),
+                },
+                AiNode {
+                    key: "setup".into(),
+                    node_type: "note".into(),
+                    name: Some("Before running".into()),
+                    configuration: json!({"content":"Review the notification text."}),
+                    disabled: false,
+                    input_bindings: BTreeMap::new(),
+                },
+            ],
+            // This is a common malformed model response: the only edge points
+            // to an annotation while the executable steps rely on a binding.
+            edges: vec![AiEdge {
+                source: "start".into(),
+                target: "setup".into(),
+                source_handle: "output".into(),
+                target_handle: "input".into(),
+            }],
+        };
+
+        let proposal = graph_to_proposal(graph, current).unwrap();
+        let by_name: HashMap<_, _> = proposal
+            .workflow
+            .nodes
+            .iter()
+            .map(|node| (node.name.as_str(), node.id.as_str()))
+            .collect();
+        assert_eq!(proposal.workflow.edges.len(), 2);
+        assert!(proposal
+            .workflow
+            .edges
+            .iter()
+            .any(
+                |edge| edge.source_node_id == proposal.workflow.trigger_node_id
+                    && edge.target_node_id == by_name["Prepare message"]
+            ));
+        assert!(proposal
+            .workflow
+            .edges
+            .iter()
+            .any(|edge| edge.source_node_id == by_name["Prepare message"]
+                && edge.target_node_id == by_name["Desktop Notification"]));
+        assert!(!proposal
+            .workflow
+            .edges
+            .iter()
+            .any(|edge| edge.source_node_id == by_name["Before running"]
+                || edge.target_node_id == by_name["Before running"]));
+        assert!(!proposal
+            .issues
+            .iter()
+            .any(|issue| issue.code == "disconnected_node"));
     }
 
     #[test]

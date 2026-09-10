@@ -47,6 +47,7 @@ import {
   createPluginNode,
   definitionFor,
   enabledPluginNodes,
+  isAnnotation,
   isTrigger,
   type PluginNodeChoice,
 } from "../catalogue";
@@ -83,7 +84,6 @@ import {
   ExecutionInspector,
   type PermissionReviewRequest,
 } from "./ExecutionInspector";
-import { NodeInspector } from "./NodeInspector";
 import { WorkflowNodeCard, type WorkflowNodeData } from "./WorkflowNodeCard";
 import { ConfirmDialog, Dialog, FocusDialog } from "./ui/Dialog";
 import { IssueNotice, IssueSummary } from "./ui/IssueNotice";
@@ -98,10 +98,14 @@ const nodeTypes = { workflow: WorkflowNodeCard };
 const AccessibleWorkflowEditor = lazy(() =>
   import("./AccessibleWorkflowEditor").then((module) => ({ default: module.AccessibleWorkflowEditor })),
 );
+const NodeInspector = lazy(() =>
+  import("./NodeInspector").then((module) => ({ default: module.NodeInspector })),
+);
 const workflowNodeDimensions = { width: 194, height: 112 } as const;
 
 function workflowNodeHandles(node: WorkflowNode): Node<WorkflowNodeData>["handles"] {
   const handles: NonNullable<Node<WorkflowNodeData>["handles"]> = [];
+  if (isAnnotation(node.type)) return handles;
   const handleSize = 9;
   const centeredHandleOffset = (workflowNodeDimensions.height - handleSize) / 2;
 
@@ -724,7 +728,7 @@ export function WorkflowEditor() {
     }
     const node = createNode(type, picker.position);
     let edges = workflow.edges;
-    if (picker.sourceId)
+    if (picker.sourceId && !isAnnotation(type))
       edges = [
         ...edges,
         {
@@ -922,7 +926,7 @@ export function WorkflowEditor() {
             onAskAi: openAiForNode,
             connectionRole,
             dimmed: Boolean(selectedNodeId && node.id !== selectedNodeId && !connectionRole),
-            onAdd: (sourceId: string) => {
+            onAdd: isAnnotation(node.type) ? undefined : (sourceId: string) => {
               const source = workflow.nodes.find(
                 (item) => item.id === sourceId,
               )!;
@@ -1305,7 +1309,7 @@ export function WorkflowEditor() {
                   });
               }}
             />
-            <NodeInspector
+            <Suspense fallback={<aside className="inspector" aria-busy="true" />}><NodeInspector
               workflow={workflow}
               node={selectedNode}
               sampleRun={testDataExecutions.find(item=>item.id===testDataExecutionId)??run}
@@ -1326,7 +1330,7 @@ export function WorkflowEditor() {
                 commit(next);
               }}
               onDelete={() => removeNode(selectedNode.id)}
-            />
+            /></Suspense>
           </>
         )}
       </div>

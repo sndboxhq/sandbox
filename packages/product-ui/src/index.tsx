@@ -29,6 +29,7 @@ export type ProductWorkflowNodeProps = {
   outputPorts?: Array<{ id: string; label: string }>;
   onAdd?: (sourceId: string) => void;
   standalone?: boolean;
+  annotation?: boolean;
   connectionRole?: "input" | "output" | "both";
   dimmed?: boolean;
   itemCount?: number;
@@ -52,13 +53,14 @@ export function ProductWorkflowNode({
   outputPorts,
   onAdd,
   standalone = false,
+  annotation = false,
   connectionRole,
   dimmed = false,
   itemCount,
 }: ProductWorkflowNodeProps) {
   return (
     <div
-      className={`node-card ${selected ? "selected" : ""} node-${status} ${disabled ? "disabled" : ""} ${inputPorts?.length ? "node-card-multi-input" : ""} ${connectionRole ? `connection-${connectionRole}` : ""} ${dimmed ? "connection-dimmed" : ""}`}
+      className={`node-card ${annotation ? "node-card-annotation" : ""} ${selected ? "selected" : ""} node-${status} ${disabled ? "disabled" : ""} ${inputPorts?.length ? "node-card-multi-input" : ""} ${connectionRole ? `connection-${connectionRole}` : ""} ${dimmed ? "connection-dimmed" : ""}`}
       data-connection-role={connectionRole}
       data-product-node="true"
     >
@@ -112,11 +114,13 @@ export function ProductWorkflowNode({
       <small>{summary}</small>
       <div
         className="node-data-contract"
-        aria-label={`${inputCount} typed inputs and ${outputLabels.length} typed outputs`}
+        aria-label={annotation ? "Canvas note; not executed" : `${inputCount} typed inputs and ${outputLabels.length} typed outputs`}
       >
-        <span>{inputCount ? `${inputCount} in` : "trigger"}</span>
-        <span aria-hidden="true">→</span>
-        <span>{outputLabels.slice(0, 2).join(", ") || "done"}</span>
+        {annotation ? <span>Canvas note · not executed</span> : <>
+          <span>{inputCount ? `${inputCount} in` : "trigger"}</span>
+          <span aria-hidden="true">→</span>
+          <span>{outputLabels.slice(0, 2).join(", ") || "done"}</span>
+        </>}
       </div>
       {itemCount != null && <span className="node-item-count" aria-label={`${itemCount} output items`}>{itemCount} item{itemCount===1?"":"s"}</span>}
       {!standalone && outputPorts?.length ? (

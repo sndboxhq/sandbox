@@ -297,6 +297,14 @@ impl Engine {
                 );
                 continue;
             }
+            if node.node_type == "note" {
+                mark_node(
+                    &mut record.node_executions[idx],
+                    NodeStatus::Skipped,
+                    "Canvas note; not executed.",
+                );
+                continue;
+            }
             if node.disabled {
                 mark_node(
                     &mut record.node_executions[idx],
