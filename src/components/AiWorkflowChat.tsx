@@ -93,7 +93,7 @@ export function AiWorkflowChat({
           <span><Sparkles size={15} /></span>
           <div><b>AI builder</b><small>Draft with your model</small></div>
         </div>
-        <button className="icon-button" onClick={() => onOpenChange(false)} aria-label="Close AI builder">
+        <button type="button" className="icon-button" onClick={() => onOpenChange(false)} aria-label="Close AI builder">
           <X size={15} />
         </button>
       </header>
@@ -109,7 +109,7 @@ export function AiWorkflowChat({
               ))}
             </CustomSelect>
           </label>
-          <button className="icon-button" onClick={() => setConnectOpen(true)} aria-label="Connect another AI">
+          <button type="button" className="icon-button" onClick={() => setConnectOpen(true)} aria-label="Connect another AI">
             <Plus size={14} />
           </button>
         </div>
@@ -118,7 +118,7 @@ export function AiWorkflowChat({
           <span className="ai-empty-mark"><Sparkles size={20} /></span>
           <h3>Bring your own AI</h3>
           <p>Connect a model to describe workflows in plain language and refine them in chat.</p>
-          <button className="button primary" onClick={() => setConnectOpen(true)}>
+          <button type="button" className="button primary" onClick={() => setConnectOpen(true)}>
             <Plus size={13} /> Connect your AI
           </button>
           <small>Keys stay in the OS credential vault.</small>
@@ -147,6 +147,7 @@ export function AiWorkflowChat({
                         {message.proposal.validationAttempts > 1 ? ` · repaired in ${message.proposal.validationAttempts} passes` : ""}
                       </span>
                       <button
+                        type="button"
                         className="button primary"
                         onClick={() => {
                           onApply(message.proposal!.workflow, message.text);
@@ -168,7 +169,7 @@ export function AiWorkflowChat({
             )}
             <div ref={endRef} />
           </div>
-          <form className="ai-chat-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+          <div className="ai-chat-composer">
             <textarea
               ref={composerRef}
               aria-label="Message AI builder"
@@ -178,17 +179,18 @@ export function AiWorkflowChat({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
+                  event.stopPropagation();
                   void send();
                 }
               }}
             />
             <div>
               <small>Drafts never run automatically · /new or /clear resets chat</small>
-              <button className="ai-send" disabled={!draft.trim() || busy} aria-label="Send message">
+              <button type="button" className="ai-send" disabled={!draft.trim() || busy} aria-label="Send message" onClick={() => void send()}>
                 <Send size={14} />
               </button>
             </div>
-          </form>
+          </div>
         </>
       )}
       <AiConnectionDialog

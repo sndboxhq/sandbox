@@ -98,17 +98,24 @@ export const useAiWorkflowStore = create<AiWorkflowState>((set, get) => {
       }));
 
       let stopListening: (() => void) | undefined;
-      try {
-        stopListening = await listen<AiWorkflowActivity>("ai-workflow-activity", (event) => {
-          if (event.payload.requestId !== requestId) return;
-          update(workflow.id, (session) => {
-            const message = event.payload.message;
-            const activities = session.activities.at(-1) === message
-              ? session.activities
-              : [...session.activities, message];
-            return { ...session, activities, statusText: message, updatedAt: Date.now() };
-          });
+      let requestFinished = false;
+      const activityListener = listen<AiWorkflowActivity>("ai-workflow-activity", (event) => {
+        if (event.payload.requestId !== requestId) return;
+        update(workflow.id, (session) => {
+          const message = event.payload.message;
+          const activities = session.activities.at(-1) === message
+            ? session.activities
+            : [...session.activities, message];
+          return { ...session, activities, statusText: message, updatedAt: Date.now() };
         });
+      }).then((unlisten) => {
+        if (requestFinished) unlisten();
+        else stopListening = unlisten;
+      }).catch(() => {
+        // Activity events are optional progress reporting. A listener failure
+        // must never prevent the actual workflow build from starting.
+      });
+      try {
         const proposal = await api.buildWorkflowWithAi(connectionId, request, workflow, requestId);
         update(workflow.id, (session) => ({
           ...session,
@@ -146,7 +153,9 @@ export const useAiWorkflowStore = create<AiWorkflowState>((set, get) => {
           updatedAt: Date.now(),
         }));
       } finally {
+        requestFinished = true;
         stopListening?.();
+        void activityListener;
       }
     },
     markApplied: (workflowId, messageId) => update(workflowId, (session) => ({
