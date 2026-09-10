@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "sndbox v0.7.10-beta.1 DEV",
+  "version": "0.7.10-beta.1",
+  "identifier": "com.sandbox.automation.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "sndbox v0.7.10-beta.1 — DEV",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1040,
+        "minHeight": 680,
+        "decorations": true,
+        "transparent": false,
+        "backgroundColor": "#0a0a0b"
+      }
+    ]
+  }
+}

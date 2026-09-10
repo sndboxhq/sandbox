@@ -1838,6 +1838,7 @@ input[type="checkbox"] {
 .ai-proposal .button { width: 100%; }
 .ai-proposal-warning { display: flex; align-items: center; gap: 5px; color: var(--warning); font-size: var(--font-xs); }
 .ai-proposal-verified { display: flex; align-items: center; gap: 5px; color: var(--success); font-size: var(--font-xs); line-height: 1.4; }
+.ai-proposal-review { display: flex; align-items: center; gap: 5px; color: var(--warning); font-size: var(--font-xs); line-height: 1.4; }
 .ai-thinking { display: flex; align-items: center; gap: 4px; min-height: 28px; color: var(--text-muted); }
 .ai-thinking i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: ai-dot 1s infinite ease-in-out; }
 .ai-thinking i:nth-child(2) { animation-delay: 120ms; }.ai-thinking i:nth-child(3) { animation-delay: 240ms; }
@@ -2318,3 +2319,21 @@ input[type="checkbox"] {
 .inspector-footer .button.danger-text { width:100%; justify-content:flex-start; border-radius:6px; color:color-mix(in srgb,var(--error) 82%,var(--text-secondary)); }
 .inspector-footer .button.danger-text:hover { background:color-mix(in srgb,var(--error) 7%,transparent); color:var(--error); }
 @media (max-width: 420px) { .inspector-title .inspector-json-button span { display:none; } .inspector-title .inspector-json-button { width:30px; justify-content:center; padding:0; } }
+
+/* Persistent background AI sessions. */
+.active-ai-tabs { position: fixed; right: 14px; bottom: 14px; z-index: 900; display: grid; justify-items: end; gap: 8px; pointer-events: none; }
+.active-ai-tab-wrap { position: relative; display: flex; align-items: center; pointer-events: auto; }
+.active-ai-tab { min-width: 156px; height: 43px; padding: 0 31px 0 11px; display: flex; align-items: center; gap: 9px; border: 1px solid color-mix(in srgb,var(--accent) 42%,var(--border)); border-radius: 9px; color: var(--text); background: color-mix(in srgb,var(--surface-raised) 95%,transparent); box-shadow: 0 12px 34px rgb(0 0 0 / 34%); backdrop-filter: blur(16px); text-align: left; }
+.active-ai-tab:hover { border-color: var(--accent); background: color-mix(in srgb,var(--accent) 9%,var(--surface-raised)); }
+.active-ai-tab > svg { flex: 0 0 auto; color: var(--accent-strong); }
+.active-ai-tab > span { min-width: 0; display: grid; gap: 2px; }
+.active-ai-tab b,.active-ai-tab small { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.active-ai-tab b { font-size: 10px; }.active-ai-tab small { color: var(--text-muted); font-size: 9px; }
+.active-ai-tab-wrap.is-failed .active-ai-tab { border-color: color-mix(in srgb,var(--error) 48%,var(--border)); }.active-ai-tab-wrap.is-failed .active-ai-tab > svg { color: var(--error); }
+.active-ai-tab-wrap.is-ready .active-ai-tab > svg { color: var(--success); }
+.active-ai-dismiss { position: absolute; right: 7px; width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 5px; color: var(--text-muted); background: transparent; }
+.active-ai-dismiss:hover { color: var(--text); background: var(--surface-hover); }
+.active-ai-hover { position: absolute; right: 0; bottom: calc(100% + 8px); width: 250px; padding: 11px 12px; display: grid; gap: 6px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text-secondary); background: #19191d; box-shadow: var(--shadow); opacity: 0; visibility: hidden; transform: translateY(4px); transition: opacity var(--fast),transform var(--fast),visibility var(--fast); pointer-events: none; }
+.active-ai-tab-wrap:hover .active-ai-hover,.active-ai-tab-wrap:focus-within .active-ai-hover { opacity: 1; visibility: visible; transform: translateY(0); }
+.active-ai-hover > span { display: flex; align-items: center; gap: 6px; color: var(--accent-strong); font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.active-ai-hover > b { font-size: 11px; line-height: 1.45; }.active-ai-hover > small { color: var(--text-muted); font-size: 9px; }.active-ai-hover > em { padding-top: 5px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 9px; font-style: normal; }

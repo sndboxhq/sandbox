@@ -19,7 +19,7 @@
     "test": "vitest run --config vite.config.ts",
     "test:watch": "vitest --config vite.config.ts",
     "tauri": "tauri",
-    "desktop:dev": "npm run browser:prepare && tauri dev",
+    "desktop:dev": "npm run browser:prepare && tauri dev --config src-tauri/tauri.dev.conf.json",
     "desktop:build": "npm run browser:prepare && tauri build",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --workspace --no-fail-fast",
     "test:rust:runners": "cargo test --manifest-path services/hosted-runner/Cargo.toml --no-fail-fast && cargo test --manifest-path agents/server/Cargo.toml --no-fail-fast",

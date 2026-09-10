@@ -55,6 +55,11 @@ const ApprovalRequest = lazy(() =>
     default: module.ApprovalRequest,
   })),
 );
+const ActiveAiTabs = lazy(() =>
+  import("./components/ActiveAiTabs").then((module) => ({
+    default: module.ActiveAiTabs,
+  })),
+);
 
 export default function App() {
   const toast = useToast();
@@ -220,6 +225,7 @@ export default function App() {
           </Suspense>
         </AsyncErrorBoundary>
       </div>
+      <Suspense fallback={null}><ActiveAiTabs /></Suspense>
       <CommandPalette
         open={commandOpen}
         onClose={() => setCommandOpen(false)}

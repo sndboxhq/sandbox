@@ -1,20 +1,18 @@
-import { listen } from "@tauri-apps/api/event";
 import { Bot, Check, Plus, Send, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { AiWorkflowActivity, AiWorkflowProposal, ConnectionMetadata, Workflow } from "../types";
+import { createAiWorkflowSession, useAiWorkflowStore } from "../aiWorkflowStore";
+import type { AiWorkflowProposal, ConnectionMetadata, Workflow } from "../types";
 import { AiActivityStatus } from "./AiActivityStatus";
 import { AiConnectionDialog } from "./AiConnectionDialog";
 import { CustomSelect } from "./ui/CustomSelect";
 
 const AI_PROVIDERS = new Set(["openai", "anthropic", "openai_compatible"]);
-interface ChatMessage {
-  id: string;
-  role: "assistant" | "user";
-  text: string;
-  proposal?: AiWorkflowProposal;
-}
-
+const proposalReviewLabel = (proposal: AiWorkflowProposal) => {
+  const incomplete = proposal.issues.filter((issue) => issue.code === "incomplete_node").length;
+  if (incomplete) return `${incomplete} setup field${incomplete === 1 ? "" : "s"} need your input`;
+  return `${proposal.issues.length} validator note${proposal.issues.length === 1 ? "" : "s"} to review`;
+};
 export interface AiWorkflowChatContext {
   key: string;
   label: string;
@@ -40,17 +38,18 @@ export function AiWorkflowChat({
   const [connectionId, setConnectionId] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [activities, setActivities] = useState<string[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "hello",
-      role: "assistant",
-      text: "Tell me what you want this workflow to do. I’ll draft the graph, then you can review it before applying anything.",
-    },
-  ]);
+  const session = useAiWorkflowStore((state) => state.sessions[workflow.id]) ?? createAiWorkflowSession(workflow);
+  const ensureSession = useAiWorkflowStore((state) => state.ensureSession);
+  const startBuild = useAiWorkflowStore((state) => state.startBuild);
+  const markApplied = useAiWorkflowStore((state) => state.markApplied);
+  const busy = session.status === "building";
+  const { activities, messages } = session;
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (open) ensureSession(workflow);
+  }, [ensureSession, open, workflow.id, workflow.name]);
 
   const loadConnections = () =>
     api.listConnections().then((items) => {
@@ -75,38 +74,7 @@ export function AiWorkflowChat({
     const text = draft.trim();
     if (!text || !connectionId || busy) return;
     setDraft("");
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text }]);
-    setBusy(true);
-    setActivities(["Preparing the workflow and request context"]);
-    const requestId = crypto.randomUUID();
-    let stopListening: (() => void) | undefined;
-    try {
-      stopListening = await listen<AiWorkflowActivity>("ai-workflow-activity", (event) => {
-        if (event.payload.requestId !== requestId) return;
-        setActivities((current) => {
-          const next = event.payload.message;
-          return current.at(-1) === next ? current : [...current, next];
-        });
-      });
-      const proposal = await api.buildWorkflowWithAi(connectionId, text, workflow, requestId);
-      setActivities((current) => [...current, "Re-checking the returned draft in the editor"]);
-      const issues = await api.validateWorkflow(proposal.workflow);
-      if (issues.length) {
-        throw new Error(`The returned workflow failed the editor's validation: ${issues[0].message}`);
-      }
-      setMessages((current) => [
-        ...current,
-        { id: crypto.randomUUID(), role: "assistant", text: proposal.message, proposal: { ...proposal, issues } },
-      ]);
-    } catch (value) {
-      setMessages((current) => [
-        ...current,
-        { id: crypto.randomUUID(), role: "assistant", text: `I couldn’t create that draft. ${String(value)}` },
-      ]);
-    } finally {
-      stopListening?.();
-      setBusy(false);
-    }
+    await startBuild(connectionId, text, workflow);
   };
 
   if (!open) return null;
@@ -164,18 +132,20 @@ export function AiWorkflowChat({
                           {message.proposal.workflow.nodes.length} nodes · {message.proposal.workflow.edges.length} connections
                         </small>
                       </div>
-                      <span className="ai-proposal-verified">
-                        <ShieldCheck size={12} /> Tested · no validation errors
+                      <span className={message.proposal.tested ? "ai-proposal-verified" : "ai-proposal-review"}>
+                        <ShieldCheck size={12} /> {message.proposal.tested
+                          ? "Tested · no validation errors"
+                          : proposalReviewLabel(message.proposal)}
                         {message.proposal.validationAttempts > 1 ? ` · repaired in ${message.proposal.validationAttempts} passes` : ""}
                       </span>
                       <button
                         className="button primary"
                         onClick={() => {
                           onApply(message.proposal!.workflow, message.text);
-                          setMessages((current) => current.map((item) => item.id === message.id ? { ...item, proposal: undefined, text: `${item.text} Applied to the canvas.` } : item));
+                          markApplied(workflow.id, message.id);
                         }}
                       >
-                        <Check size={13} /> Apply tested workflow
+                        <Check size={13} /> {message.proposal.tested ? "Apply tested workflow" : "Apply draft and finish setup"}
                       </button>
                     </div>
                   )}

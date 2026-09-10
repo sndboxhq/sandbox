@@ -1,6 +1,6 @@
 use crate::{credential_vault::CredentialVault, AppState};
 use sandbox_engine::{
-    validation::{validate, ValidationIssue},
+    validation::{validate, ValidationIssue, ValidationSeverity},
     ConnectionStatus, Database, Position, Workflow, WorkflowEdge, WorkflowNode,
 };
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,10 @@ const SUPPORTED_NODES: &[&str] = &[
     "schedule_trigger",
     "file_watch_trigger",
     "condition",
+    "filter",
+    "split_out",
+    "aggregate",
+    "remove_duplicates",
     "set_data",
     "delay",
     "http_request",
@@ -39,6 +43,8 @@ const SUPPORTED_NODES: &[&str] = &[
     "run_command",
     "ai_prompt",
     "code",
+    "javascript_code",
+    "python_code",
     "web_builder",
     "open_browser",
     "navigate",
@@ -278,21 +284,29 @@ pub async fn build_workflow_with_ai(
                 ));
             }
         };
-        if proposal.issues.is_empty() {
-            proposal.tested = true;
+        let blocking_issues = proposal
+            .issues
+            .iter()
+            .filter(|issue| is_blocking_ai_issue(issue))
+            .collect::<Vec<_>>();
+        if blocking_issues.is_empty() {
+            proposal.tested = proposal.issues.is_empty();
             proposal.validation_attempts = attempt;
             emit_workflow_activity(
                 &app,
                 &request_id,
                 "complete",
-                "Workflow test passed with no validation issues",
+                if proposal.tested {
+                    "Workflow test passed with no validation issues"
+                } else {
+                    "Draft is structurally sound and ready for you to finish"
+                },
                 attempt,
             );
             return Ok(proposal);
         }
 
-        let issue_summary = proposal
-            .issues
+        let issue_summary = blocking_issues
             .iter()
             .map(|issue| format!("- {}: {}", issue.code, issue.message))
             .collect::<Vec<_>>()
@@ -323,6 +337,14 @@ pub async fn build_workflow_with_ai(
         );
     }
     Err("The AI workflow test ended unexpectedly. No draft was returned.".into())
+}
+
+/// Missing credentials, URLs, paths, and other user-owned values should not
+/// prevent the AI from returning a useful graph. The editor highlights those
+/// fields before a run; malformed topology and invalid bindings remain fatal.
+fn is_blocking_ai_issue(issue: &ValidationIssue) -> bool {
+    issue.code != "incomplete_node"
+        && (issue.severity == ValidationSeverity::Error || issue.code == "disconnected_node")
 }
 
 fn emit_workflow_activity(
@@ -623,7 +645,7 @@ async fn request_provider(
             .header("anthropic-version", "2023-06-01")
             .json(&json!({
                 "model": model,
-                "max_tokens": 6_000,
+                "max_tokens": 8_000,
                 "system": system,
                 "messages": [{"role": "user", "content": user}]
             }))
@@ -637,6 +659,7 @@ async fn request_provider(
                 "model": model,
                 "instructions": system,
                 "input": user,
+                "max_output_tokens": 8_000,
                 "store": false,
                 "text": {
                     "format": {
@@ -656,6 +679,7 @@ async fn request_provider(
             .bearer_auth(api_key)
             .json(&json!({
                 "model": model,
+                "max_tokens": 8_000,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user}
@@ -756,7 +780,26 @@ fn parse_graph(content: &str) -> Result<AiGraph> {
     } else {
         trimmed
     };
-    serde_json::from_str(json_text.trim()).map_err(|error| {
+    let candidate = json_text.trim();
+    if let Ok(graph) = serde_json::from_str(candidate) {
+        return Ok(graph);
+    }
+    // Compatible providers do not all honour JSON-only instructions. Recover
+    // a complete outer object when they add a short preface or epilogue.
+    if let (Some(start), Some(end)) = (candidate.find('{'), candidate.rfind('}')) {
+        if start < end {
+            if let Ok(graph) = serde_json::from_str(&candidate[start..=end]) {
+                return Ok(graph);
+            }
+        }
+    }
+    // A few gateways encode the JSON object as a JSON string.
+    if let Ok(encoded) = serde_json::from_str::<String>(candidate) {
+        if let Ok(graph) = serde_json::from_str(&encoded) {
+            return Ok(graph);
+        }
+    }
+    serde_json::from_str::<AiGraph>(candidate).map_err(|error| {
         format!("The AI response was not a valid sndbox workflow proposal: {error}")
     })
 }
@@ -799,6 +842,7 @@ fn graph_to_proposal(graph: AiGraph, current: Workflow) -> Result<AiWorkflowProp
     }
     let trigger_key = trigger_keys[0].clone();
 
+    apply_configuration_defaults(&mut graph);
     normalize_web_builder_connections(&mut graph);
 
     let ids: HashMap<String, String> = graph
@@ -977,6 +1021,67 @@ fn graph_to_proposal(graph: AiGraph, current: Workflow) -> Result<AiWorkflowProp
     })
 }
 
+/// Fill in stable runtime options the model commonly omits. Model-supplied
+/// values always win; user-owned values such as credentials and paths stay blank.
+fn apply_configuration_defaults(graph: &mut AiGraph) {
+    for node in &mut graph.nodes {
+        let defaults = match node.node_type.as_str() {
+            "schedule_trigger" => {
+                json!({"scheduleType":"minutes","every":15,"time":"09:00","cron":"0 */15 * * *"})
+            }
+            "file_watch_trigger" => json!({"folder":"","events":["created"],"pattern":""}),
+            "condition" => json!({"left":"","operator":"equals","right":""}),
+            "filter" => {
+                json!({"mode":"keep_matches","combinator":"all","rules":[{"id":"rule_1","field":"","operator":"equals","value":""}],"exposeRejected":true})
+            }
+            "split_out" => {
+                json!({"fieldPath":"","destinationField":"item","keepParentFields":true,"keepOriginalArray":false,"includeIndex":true,"emptyArrayPolicy":"emit_no_items","invalidInputPolicy":"fail"})
+            }
+            "aggregate" => {
+                json!({"operation":"collect_items","fieldPath":"","includeMissing":false,"preserveLineage":false,"separator":",","groupFields":[],"keyField":"id","duplicateKeyPolicy":"fail"})
+            }
+            "remove_duplicates" => {
+                json!({"fields":[],"caseSensitive":true,"normalizeWhitespace":false,"keep":"first","scope":"collection","exposeDuplicates":true})
+            }
+            "set_data" => json!({"values":{"key":"value"}}),
+            "delay" => json!({"amount":1,"unit":"seconds"}),
+            "http_request" => {
+                json!({"method":"GET","url":"","query":{},"headers":{},"body":null,"timeoutMs":30000,"retryCount":0})
+            }
+            "desktop_notification" => json!({"title":"sndbox","message":"Workflow completed"}),
+            "parse_csv" => {
+                json!({"path":"","content":"","delimiter":",","hasHeaders":true,"trim":true})
+            }
+            "parse_json" => json!({"path":"","content":""}),
+            "parse_text" => json!({"path":"","content":"","trim":true,"removeEmptyLines":false}),
+            "code" => {
+                json!({"language":"javascript","sourceCode":"","executionMode":"source","itemMode":"all_items","runtimeVersion":">=20","helperLanguageVersion":1,"dependencies":[],"timeoutMs":30000})
+            }
+            "javascript_code" => {
+                json!({"language":"javascript","sourceCode":"","executionMode":"run","itemMode":"all_items","runtimeVersion":">=20","helperLanguageVersion":1,"dependencies":[],"timeoutMs":30000})
+            }
+            "python_code" => {
+                json!({"language":"python","sourceCode":"","executionMode":"run","itemMode":"all_items","runtimeVersion":">=3.11","helperLanguageVersion":1,"dependencies":[],"timeoutMs":30000})
+            }
+            "web_builder" => {
+                json!({"html":"","javascript":"","css":"","port":0,"openBrowser":true})
+            }
+            _ => json!({}),
+        };
+        let Some(configuration) = node.configuration.as_object_mut() else {
+            continue;
+        };
+        let Some(defaults) = defaults.as_object() else {
+            continue;
+        };
+        for (key, value) in defaults {
+            configuration
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
+        }
+    }
+}
+
 /// Models occasionally describe a control-flow dependency as a generic edge into
 /// Web Builder. The canvas has no generic Web Builder input: its three incoming
 /// edges are typed source-code bindings. Repair those drafts from the Code node
@@ -1077,7 +1182,7 @@ fn normalize_web_builder_connections(graph: &mut AiGraph) {
 
 fn system_prompt() -> String {
     format!(
-        "You are the workflow builder inside sndbox. Convert the user's request into a complete visual workflow graph using the application's nodes, not by pretending that one code block performs the whole workflow. Return JSON only, with this exact shape: {{\"reply\":\"brief explanation\",\"name\":\"optional workflow name\",\"description\":\"optional description\",\"nodes\":[{{\"key\":\"stable_local_key\",\"type\":\"node_type\",\"name\":\"label\",\"configuration\":{{}},\"inputBindings\":{{\"targetField\":{{\"source\":\"upstream_key\",\"output\":\"output_key\"}}}},\"disabled\":false}}],\"edges\":[{{\"source\":\"key\",\"target\":\"key\",\"sourceHandle\":\"output\",\"targetHandle\":\"input\"}}]}}. Output the complete replacement graph, including unchanged nodes when editing. Use exactly one trigger. Condition branches use sourceHandle true or false. Bind data between nodes with inputBindings and the upstream output key. Important capabilities: schedule_trigger runs recurring checks; http_request performs HTTP calls and outputs status, body, and finalUrl; condition branches on values; get_workflow_state, set_workflow_state, and compare_previous persist and compare results; desktop_notification and communication nodes alert users; Code nodes author or transform data; Web Builder renders a localhost interface. HTTP checks, state, conditions, and alerts must be real workflow nodes rather than browser-side fetch code when the user asks for monitoring. Code nodes use configuration {{\"language\":\"python|html|javascript|css\",\"sourceCode\":\"complete working source\",\"executionMode\":\"source|run\"}}. When the user asks for an interface, write complete HTML, JavaScript, and CSS source in three Code nodes. Web Builder accepts only those three matching Code outputs: map code to html, javascript, and css with inputBindings and create one matching edge per input. Never connect HTTP, condition, state, trigger, or notification nodes directly to Web Builder. Keep the monitoring flow as its own node branch and the interface as a Code/Web Builder branch. All non-Web-Builder edges use targetHandle input. Never leave requested code blocks empty. Never invent node types, credentials, API keys, file paths, selectors, addresses, or personal data; leave unknown external configuration values empty so the user can review them. Keep side-effecting actions disabled when intent is ambiguous. Supported node types: {}.",
+        "You are the workflow builder inside sndbox. Convert the user's request into a complete visual workflow graph using the application's nodes, not by pretending that one code block performs the whole workflow. Return JSON only, with this exact shape: {{\"reply\":\"brief explanation\",\"name\":\"optional workflow name\",\"description\":\"optional description\",\"nodes\":[{{\"key\":\"stable_local_key\",\"type\":\"node_type\",\"name\":\"label\",\"configuration\":{{}},\"inputBindings\":{{\"targetField\":{{\"source\":\"upstream_key\",\"output\":\"output_key\"}}}},\"disabled\":false}}],\"edges\":[{{\"source\":\"key\",\"target\":\"key\",\"sourceHandle\":\"output\",\"targetHandle\":\"input\"}}]}}. Output the complete replacement graph, including unchanged nodes when editing. Use exactly one trigger and make every enabled node reachable from it. Condition branches use sourceHandle true or false. Filter and Split Out use output or rejected; Remove Duplicates uses output or duplicates. Bind data between nodes with inputBindings and the upstream output key. Important capabilities: schedule_trigger runs recurring checks; http_request performs HTTP calls and outputs status, body, and finalUrl; condition branches on values; get_workflow_state, set_workflow_state, and compare_previous persist and compare results; desktop_notification and communication nodes alert users; JavaScript Code and Python Code transform workflow data; legacy Code nodes author HTML, browser JavaScript, or CSS source; Web Builder renders a localhost interface. HTTP checks, state, conditions, and alerts must be real workflow nodes rather than browser-side fetch code when the user asks for monitoring. Code nodes use configuration {{\"language\":\"python|html|javascript|css\",\"sourceCode\":\"complete working source\",\"executionMode\":\"source|run\"}}. When the user asks for an interface, write complete HTML, JavaScript, and CSS source in three Code nodes. Web Builder accepts only those three matching Code outputs: map code to html, javascript, and css with inputBindings and create one matching edge per input. Never connect HTTP, condition, state, trigger, or notification nodes directly to Web Builder. Keep the monitoring flow as its own node branch and the interface as a Code/Web Builder branch, with both branches connected to the trigger. All non-Web-Builder edges use targetHandle input. Never leave requested code blocks empty. Never invent node types, credentials, API keys, file paths, selectors, addresses, or personal data; leave unknown external configuration values empty so the user can review them. Keep side-effecting actions disabled when intent is ambiguous. Supported node types: {}.",
         SUPPORTED_NODES.join(", ")
     )
 }
@@ -1127,7 +1232,7 @@ fn workflow_schema() -> Value {
                     "properties": {
                         "source": {"type": "string"},
                         "target": {"type": "string"},
-                        "sourceHandle": {"type": "string", "enum": ["output", "true", "false"]},
+                        "sourceHandle": {"type": "string", "enum": ["output", "true", "false", "rejected", "duplicates"]},
                         "targetHandle": {"type": "string", "enum": ["input", "html", "javascript", "css"]}
                     }
                 }
@@ -1175,6 +1280,38 @@ mod tests {
     fn parses_fenced_json() {
         let value = parse_graph("```json\n{\"nodes\":[],\"edges\":[]}\n```").unwrap();
         assert!(value.nodes.is_empty());
+    }
+
+    #[test]
+    fn parses_json_surrounded_by_provider_commentary() {
+        let value =
+            parse_graph("Here is the workflow:\n{\"nodes\":[],\"edges\":[]}\nDone.").unwrap();
+        assert!(value.nodes.is_empty());
+    }
+
+    #[test]
+    fn incomplete_fields_are_reviewable_but_structural_errors_block() {
+        let reviewable = ValidationIssue {
+            code: "incomplete_node".into(),
+            message: "Add a URL.".into(),
+            severity: ValidationSeverity::Error,
+            node_id: None,
+            edge_id: None,
+            field_path: None,
+            suggestion: None,
+        };
+        let structural = ValidationIssue {
+            code: "cycle".into(),
+            ..reviewable.clone()
+        };
+        let disconnected = ValidationIssue {
+            code: "disconnected_node".into(),
+            severity: ValidationSeverity::Warning,
+            ..reviewable.clone()
+        };
+        assert!(!is_blocking_ai_issue(&reviewable));
+        assert!(is_blocking_ai_issue(&structural));
+        assert!(is_blocking_ai_issue(&disconnected));
     }
 
     #[test]

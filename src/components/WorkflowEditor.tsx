@@ -92,6 +92,7 @@ import { Tooltip } from "./ui/Tooltip";
 import { clearWorkflowDraft, draftUsesEarlierBase, readWorkflowDraft, writeWorkflowDraft, type WorkflowDraft } from "../workflowDrafts";
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "../workspaceState";
 import { isTextEntryTarget, useKeyboardShortcuts } from "../useKeyboardShortcuts";
+import { useAiWorkflowStore } from "../aiWorkflowStore";
 
 const nodeTypes = { workflow: WorkflowNodeCard };
 const AccessibleWorkflowEditor = lazy(() =>
@@ -244,6 +245,8 @@ export function WorkflowEditor() {
   const [aiChatOpen, setAiChatOpen] = useState(false);
   const [aiChatContext, setAiChatContext] =
     useState<AiWorkflowChatContext>();
+  const aiOpenRequested = useAiWorkflowStore((state) => state.sessions[workflow.id]?.openRequested ?? false);
+  const consumeAiOpenRequest = useAiWorkflowStore((state) => state.consumeOpenRequest);
   const [announcement, setAnnouncement] = useState("");
   const [browserProfiles, setBrowserProfiles] = useState<BrowserProfile[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>(
@@ -269,6 +272,11 @@ export function WorkflowEditor() {
     setPermissionOpen(false);
     setPermissionRequest(undefined);
   };
+  useEffect(() => {
+    if (!aiOpenRequested) return;
+    setAiChatOpen(true);
+    consumeAiOpenRequest(workflow.id);
+  }, [aiOpenRequested, consumeAiOpenRequest, workflow.id]);
   useEffect(() => {
     if (selectedNodeId) setAuxiliaryTab("inspector");
   }, [selectedNodeId]);
