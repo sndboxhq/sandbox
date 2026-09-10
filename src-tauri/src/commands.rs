@@ -1813,7 +1813,7 @@ pub fn reconnect_connection(
 }
 
 #[tauri::command]
-pub fn test_connection(id: String, state: State<'_, AppState>) -> Result<Value> {
+pub async fn test_connection(id: String, state: State<'_, AppState>) -> Result<Value> {
     let connection = state
         .engine
         .database()
@@ -1825,6 +1825,23 @@ pub fn test_connection(id: String, state: State<'_, AppState>) -> Result<Value> 
             "{} has no secret in the operating-system credential store. Reconnect it.",
             connection.display_name
         ));
+    }
+    if matches!(
+        connection.provider.as_str(),
+        "openai" | "anthropic" | "openai_compatible"
+    ) {
+        let secret = state.credential_vault.get(&id)?;
+        let api_key = secret
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "The AI API key is missing. Reconnect this provider.".to_string())?;
+        return crate::ai_builder::test_ai_provider_connection(
+            &connection.provider,
+            &connection.metadata,
+            api_key,
+        )
+        .await;
     }
     Ok(
         json!({"healthy":true,"provider":connection.provider,"message":"Credential is available in the operating-system store."}),

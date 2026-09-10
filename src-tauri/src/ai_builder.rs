@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    error::Error as StdError,
     sync::Arc,
 };
 use tauri::{AppHandle, Emitter, State};
@@ -568,7 +569,7 @@ async fn request_text_provider(
             .send()
             .await
     }
-    .map_err(|error| format!("The AI provider could not be reached: {error}"))?;
+    .map_err(ai_transport_error)?;
     let status = response.status();
     let value: Value = response
         .json()
@@ -688,7 +689,7 @@ async fn request_provider(
             .send()
             .await
     }
-    .map_err(|error| format!("The AI provider could not be reached: {error}"))?;
+    .map_err(ai_transport_error)?;
 
     let status = response.status();
     let value: Value = response
@@ -769,6 +770,96 @@ fn compatible_base_url(metadata: &Value) -> Result<String> {
         return Err("Put credentials in the API key field, not in the AI base URL.".into());
     }
     Ok(raw.trim_end_matches('/').to_string())
+}
+
+fn ai_transport_error(error: reqwest::Error) -> String {
+    let mut chain = vec![error.to_string()];
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let detail = cause.to_string();
+        if !detail.is_empty() && chain.last() != Some(&detail) {
+            chain.push(detail);
+        }
+        source = cause.source();
+    }
+    let guidance = if error.is_timeout() {
+        "The request timed out. Check the connection and try again."
+    } else if error.is_connect() {
+        "Check your internet connection, VPN, proxy, firewall, and any TLS-inspection certificate configured on this device."
+    } else if error.is_builder() {
+        "Reconnect this AI provider; the stored endpoint or credential contains an invalid value."
+    } else {
+        "Try again, then test the connection from Settings if the problem continues."
+    };
+    format!(
+        "The AI provider could not be reached. {} {guidance}",
+        chain.join(": ")
+    )
+}
+
+pub(crate) async fn test_ai_provider_connection(
+    provider: &str,
+    metadata: &Value,
+    api_key: &str,
+) -> Result<Value> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("The AI client could not start: {error}"))?;
+    let response = if provider == "anthropic" {
+        client
+            .get("https://api.anthropic.com/v1/models")
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .send()
+            .await
+    } else if provider == "openai" {
+        client
+            .get("https://api.openai.com/v1/models")
+            .bearer_auth(api_key)
+            .send()
+            .await
+    } else if provider == "openai_compatible" {
+        let base = compatible_base_url(metadata)?;
+        client
+            .get(format!("{}/models", base.trim_end_matches('/')))
+            .bearer_auth(api_key)
+            .send()
+            .await
+    } else {
+        return Err("This connection is not an AI provider.".into());
+    }
+    .map_err(ai_transport_error)?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("The AI provider returned an unreadable response: {error}"))?;
+    if !status.is_success() {
+        let value = serde_json::from_str::<Value>(&body).unwrap_or(Value::Null);
+        let detail = value
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("error").and_then(Value::as_str))
+            .unwrap_or_else(|| body.trim());
+        let detail = if detail.is_empty() {
+            "The provider rejected the connection test."
+        } else {
+            detail
+        };
+        return Err(format!(
+            "AI provider HTTP {status}: {}",
+            truncate(detail, 500)
+        ));
+    }
+
+    Ok(json!({
+        "healthy": true,
+        "provider": provider,
+        "message": "The AI provider is reachable and accepted this credential."
+    }))
 }
 
 fn parse_graph(content: &str) -> Result<AiGraph> {

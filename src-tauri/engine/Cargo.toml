@@ -9,7 +9,7 @@ chrono = { version = "0.4", features = ["serde"] }
 cron = "0.15"
 globset = "0.4"
 regex = "1"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "rustls-tls-native-roots"], default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

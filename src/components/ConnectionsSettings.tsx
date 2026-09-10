@@ -112,13 +112,21 @@ export function ConnectionsSettings() {
     }
   };
 
-  const act = async (action: () => Promise<unknown>, success?: string) => {
+  const act = async (
+    action: () => Promise<unknown>,
+    success?: string | ((result: unknown) => string),
+  ) => {
     setBusy(true);
     setNotice(undefined);
     try {
-      await action();
+      const result = await action();
       await load();
-      if (success) setNotice({ kind: "success", text: success });
+      if (success) {
+        setNotice({
+          kind: "success",
+          text: typeof success === "function" ? success(result) : success,
+        });
+      }
     } catch (value) {
       setNotice({ kind: "error", text: String(value) });
     } finally {
@@ -293,7 +301,9 @@ export function ConnectionsSettings() {
                   onClick={() =>
                     act(
                       () => api.testConnection(connection.id),
-                      `${connection.displayName} is available in the OS credential store.`,
+                      (result) =>
+                        (result as { message?: string }).message ??
+                        `${connection.displayName} passed its connection test.`,
                     )
                   }
                 >
