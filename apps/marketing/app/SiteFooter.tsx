@@ -69,11 +69,13 @@ export function SiteFooter() {
 
       <Link className={styles.display} href="/" aria-label="sndbox home">sndbox</Link>
       <div className={styles.legal}>
-        <small>© 2026 sndbox. Legal content requires professional review.</small>
+        <small>© 2026 sndbox. All rights reserved.</small>
         <div>
           <Link href="/legal/privacy">Privacy</Link>
           <Link href="/legal/terms">Terms</Link>
           <Link href="/legal/cookies">Cookies</Link>
+          <Link href="/legal/refunds">Refunds</Link>
+          <Link href="/legal/accessibility">Accessibility</Link>
         </div>
       </div>
     </footer>

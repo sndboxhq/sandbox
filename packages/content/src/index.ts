@@ -61,7 +61,7 @@ export const useCases = [
 
 export const launchRelease = { version:"0.7.8-beta.1", date:"Repository state", channel:"Beta", summary:"Current repository version. No public download artifact is attached to this source state.", availableArtifacts:[] as Array<{platform:string;architecture:string;url:string;size:string;checksum:string;signature:string}> };
 
-export const legalPages = ["terms","privacy","cookies","acceptable-use","marketplace-terms","publisher-terms","data-processing-addendum","subprocessors","vulnerability-disclosure","refunds"] as const;
+export const legalPages = ["terms","privacy","cookies","acceptable-use","marketplace-terms","publisher-terms","data-processing-addendum","subprocessors","vulnerability-disclosure","refunds","accessibility","complaints"] as const;
 
 export type TransactionalEmail = { key:string; subject:string; html:(values:Record<string,string>)=>string; text:(values:Record<string,string>)=>string };
 const email = (key:string,subject:string,heading:string,body:string):TransactionalEmail => ({key,subject,html:values=>`<!doctype html><html><body style="margin:0;background:#08090a;color:#f2f4f5;font-family:Arial,sans-serif"><main style="max-width:560px;margin:auto;padding:40px 24px"><p style="color:#d6ff4b;font-size:12px">sndbox</p><h1 style="font-size:24px">${heading}</h1><p style="color:#a4abb2;line-height:1.6">${body.replace(/\{(\w+)\}/g,(_,name)=>values[name]??`{${name}}`)}</p><p style="color:#626a72;font-size:11px">This is a transactional account message.</p></main></body></html>`,text:values=>`sndbox\n\n${heading}\n\n${body.replace(/\{(\w+)\}/g,(_,name)=>values[name]??`{${name}}`)}\n\nThis is a transactional account message.`});

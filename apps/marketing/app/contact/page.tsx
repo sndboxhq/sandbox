@@ -7,6 +7,10 @@ const enquiryTypes = new Set([
   "publisher",
   "product",
   "security-documents",
+  "legal",
+  "privacy",
+  "accessibility",
+  "security",
 ]);
 
 export default function Page() {
@@ -44,7 +48,7 @@ export default function Page() {
       <header>
         <p className="eyebrow"><span />Contact</p>
         <h1>Talk to the right team.</h1>
-        <p>Enterprise, publisher, product and security enquiries are routed separately.</p>
+        <p>Product, commercial, legal, privacy, accessibility and security enquiries are routed separately.</p>
       </header>
       {state === "sent" ? (
         <section className="form-success" role="status">
@@ -60,6 +64,10 @@ export default function Page() {
               <option value="publisher">Publisher</option>
               <option value="product">Product</option>
               <option value="security-documents">Security documentation</option>
+              <option value="legal">Legal or consumer complaint</option>
+              <option value="privacy">Privacy request</option>
+              <option value="accessibility">Accessibility feedback</option>
+              <option value="security">Security vulnerability</option>
             </select>
           </label>
           <label>Name<input name="name" required minLength={2} /></label>
@@ -67,7 +75,7 @@ export default function Page() {
           <label>Organisation<input name="organisation" /></label>
           <label>What do you need?<textarea name="message" required minLength={20} rows={6} /></label>
           <label className="honeypot" aria-hidden="true">Website<input name="website" tabIndex={-1} autoComplete="off" /></label>
-          <label className="consent"><input type="checkbox" name="consent" value="yes" required /> I agree that sndbox may use these details to respond to this enquiry.</label>
+          <label className="consent"><input type="checkbox" name="consent" value="yes" required /> I have read the <a href="/legal/privacy">Privacy notice</a> and understand that sndbox will use these details to respond.</label>
           <button type="submit" disabled={state === "sending"} className="sb-button sb-button--primary">
             {state === "sending" ? "Sending…" : "Send enquiry"}
           </button>
