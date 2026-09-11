@@ -1,0 +1,90 @@
+---
+title: "Note"
+description: "Place setup instructions or context on the canvas. Exact configuration, ports, placement, and execution behavior."
+icon: "sticky-note"
+---
+
+**Node type:** `note` · **Version:** `1` · **Category:** Notes
+
+Place setup instructions or context on the canvas. Notes are non-executable canvas annotations and do not affect workflow behavior.
+
+## When to use this node
+
+- Keep setup instructions, assumptions, and handoff context beside the workflow they explain.
+- Document why a branch, connection, or permission exists without adding an executable step.
+
+## Example: Document an environment prerequisite
+
+Place a note near the nodes that depend on a configured connection or local folder.
+
+
+```json title="Example settings"
+{
+  "content": "Before running: connect the Support account and confirm the staging environment."
+}
+```
+
+This shows the important settings, not a complete exported node.
+
+
+1. Add a Note from the Notes category.
+2. Write the prerequisite or decision in concise plain language.
+3. Position it beside the related nodes so future editors see it before running the workflow.
+
+
+## Configuration
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `content` | string | `"Add instructions, assumptions, or setup details here."` | Plain-text setup instructions or context stored with the workflow. Do not include secrets. |
+
+
+
+## Workflow JSON
+
+The editor stores this node with the following implemented default configuration:
+
+```json title="Default node configuration"
+{
+  "type": "note",
+  "version": 1,
+  "configuration": {
+    "content": "Add instructions, assumptions, or setup details here."
+  }
+}
+```
+
+Note content is stored with the workflow for collaborators and is never treated as executable input.
+
+## Inputs
+
+This node has no typed ports in this direction.
+
+## Outputs
+
+This node has no typed ports in this direction.
+
+## Execution behavior
+
+- Notes are canvas annotations and never execute.
+- They have no input or output ports and do not change workflow data, permissions, scheduling, or run results.
+- This annotation has no output ports because it never participates in execution.
+
+## Common issues
+
+- A note does not enforce the instruction it describes; use validation, permissions, or approval nodes for enforceable safeguards.
+- Keep secrets out of note text because annotations are stored with the workflow.
+
+
+## Where it can run
+
+Notes stay on the workflow canvas and are never dispatched to a desktop, paired, hosted, or browser runner.
+
+## Test and inspect
+
+Edit the note directly on the canvas. It is saved with the workflow but does not appear as an executable step in run history.
+
+## Related guides
+
+- [Build your first workflow](/getting-started/first-workflow)
+- [Workflow permissions](/workflows/permissions)

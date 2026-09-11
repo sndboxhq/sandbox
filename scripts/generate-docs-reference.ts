@@ -28,7 +28,7 @@ const docsRoot = resolve(repositoryRoot, "apps/docs");
 const nodesRoot = resolve(docsRoot, "nodes");
 const apiRoot = resolve(docsRoot, "api-reference");
 
-const categoryOrder = ["Triggers", "Logic", "Data", "Network", "Browser", "Communication", "System"];
+const categoryOrder = ["Triggers", "Logic", "Data", "Network", "Browser", "Communication", "System", "Notes"];
 const categoryIcons: Record<string, string> = {
   Triggers: "zap",
   Logic: "git-branch",
@@ -37,6 +37,7 @@ const categoryIcons: Record<string, string> = {
   Browser: "mouse-pointer-click",
   Communication: "send",
   System: "terminal",
+  Notes: "sticky-note",
 };
 
 const fieldDescriptions: Record<string, string> = {
@@ -163,6 +164,7 @@ const fieldDescriptions: Record<string, string> = {
 };
 
 const nodeFieldDescriptions: Record<string, string> = {
+  "note.content": "Plain-text setup instructions or context stored with the workflow. Do not include secrets.",
   "read_file.encoding": "Text encoding used to read the file. The current runner accepts UTF-8 only.",
   "run_command.timeoutMs": "Reserved timeout setting stored in the node schema. The current runner stops the process on cancellation but does not yet enforce this value.",
   "filter.mode":"Keep matching items or remove matching items.","filter.combinator":"Require all rules or any rule.","filter.rules":"Ordered strict rule definitions with stable IDs.","filter.exposeRejected":"Expose removed items through the Rejected branch.",
@@ -258,6 +260,18 @@ const nodeNotes: Record<string, string[]> = {
 };
 
 const nodeGuides: Record<string, NodeGuide> = {
+  note: {
+    useCases: ["Keep setup instructions, assumptions, and handoff context beside the workflow they explain.", "Document why a branch, connection, or permission exists without adding an executable step."],
+    example: {
+      title: "Document an environment prerequisite",
+      description: "Place a note near the nodes that depend on a configured connection or local folder.",
+      configuration: { content: "Before running: connect the Support account and confirm the staging environment." },
+      flow: ["Add a Note from the Notes category.", "Write the prerequisite or decision in concise plain language.", "Position it beside the related nodes so future editors see it before running the workflow."],
+    },
+    behavior: ["Notes are canvas annotations and never execute.", "They have no input or output ports and do not change workflow data, permissions, scheduling, or run results."],
+    commonIssues: ["A note does not enforce the instruction it describes; use validation, permissions, or approval nodes for enforceable safeguards.", "Keep secrets out of note text because annotations are stored with the workflow."],
+    related: [{ label: "Build your first workflow", href: "/getting-started/first-workflow" }, { label: "Workflow permissions", href: "/workflows/permissions" }],
+  },
   manual_trigger: {
     useCases: ["Build and debug a workflow before choosing an automatic trigger.", "Run an operator-led task where a person should decide exactly when work starts."],
     example: {
@@ -901,7 +915,9 @@ ${guide.example.flow.map((item, index) => `${index + 1}. ${item}`).join("\n")}
 
 function renderBehavior(node: NodeDefinition): string {
   const guide = guideFor(node)!;
-  const portSummary = node.outputs.length
+  const portSummary = node.type === "note"
+    ? "This annotation has no output ports because it never participates in execution."
+    : node.outputs.length
     ? `The editor catalogue declares ${node.outputs.map(port => `\`${port.key}\` (${port.type})`).join(", ")} for mapping. The execution inspector can contain additional evidence fields; inspect a real result before selecting nested paths from object or any outputs.`
     : "This node has no declared output ports; its value is in controlling when or how later work proceeds.";
   return `## Execution behavior
@@ -923,7 +939,22 @@ ${guideFor(node)!.related.map(item => `- [${item.label}](${item.href})`).join("\
 
 function renderNode(node: NodeDefinition): string {
   const notes = nodeNotes[node.type] ?? [];
+  const annotation = node.type === "note";
   const placementNames: Record<string, string> = { local: "Desktop local runner", paired_runner: "Paired self-hosted runner", hosted_runner: "Hosted runner", managed_browser: "Managed browser worker" };
+  const classification = annotation
+    ? "Notes are non-executable canvas annotations and do not affect workflow behavior."
+    : node.sideEffect
+      ? "sndbox classifies this node as side-effecting, so tests or automatic runs can require additional confirmation and permission review."
+      : "This node is not marked with the catalogue's generic side-effect flag. That classification is not a guarantee that every configured operation is read-only; review the concrete action and its destination.";
+  const mappingGuidance = annotation
+    ? "Note content is stored with the workflow for collaborators and is never treated as executable input."
+    : "Values may be entered literally or mapped from an earlier compatible output when the inspector exposes a mapping control. See [Variables and data mapping](/workflows/variables-and-data).";
+  const placementGuidance = annotation
+    ? "Notes stay on the workflow canvas and are never dispatched to a desktop, paired, hosted, or browser runner."
+    : node.placements.map(placement => `- ${placementNames[placement] ?? placement}`).join("\n");
+  const inspectionGuidance = annotation
+    ? "Edit the note directly on the canvas. It is saved with the workflow but does not appear as an executable step in run history."
+    : "Use **Test node** in the editor to preview this step with the current configuration. A full run records resolved inputs, outputs, logs, duration, and any artifacts in the execution inspector. Side-effecting or destructive nodes can require an additional confirmation or approved workflow permission.";
   return `---
 title: "${node.name}"
 description: "${node.description}. Exact configuration, ports, placement, and execution behavior."
@@ -932,7 +963,7 @@ icon: "${categoryIcons[node.group] ?? "blocks"}"
 
 **Node type:** \`${node.type}\` · **Version:** \`1\` · **Category:** ${node.group}
 
-${node.description}. ${node.sideEffect ? "sndbox classifies this node as side-effecting, so tests or automatic runs can require additional confirmation and permission review." : "This node is not marked with the catalogue's generic side-effect flag. That classification is not a guarantee that every configured operation is read-only; review the concrete action and its destination."}
+${node.description}. ${classification}
 
 ${renderGuide(node)}
 
@@ -950,7 +981,7 @@ The editor stores this node with the following implemented default configuration
 ${exampleNode(node)}
 \`\`\`
 
-Values may be entered literally or mapped from an earlier compatible output when the inspector exposes a mapping control. See [Variables and data mapping](/workflows/variables-and-data).
+${mappingGuidance}
 
 ## Inputs
 
@@ -964,11 +995,11 @@ ${renderBehavior(node)}
 
 ## Where it can run
 
-${node.placements.map(placement => `- ${placementNames[placement] ?? placement}`).join("\n")}
+${placementGuidance}
 
 ## Test and inspect
 
-Use **Test node** in the editor to preview this step with the current configuration. A full run records resolved inputs, outputs, logs, duration, and any artifacts in the execution inspector. Side-effecting or destructive nodes can require an additional confirmation or approved workflow permission.
+${inspectionGuidance}
 
 ${renderRelated(node)}
 `;
@@ -1022,6 +1053,7 @@ Drawing an edge does not automatically map every output. Open the destination no
 | Interact with a site | Browser | Open a managed session first and prefer recorded accessible locators. |
 | Send or modify messages | Communication | Credentials stay in connections; mutations require permission review. |
 | Change the local system | System | Keep filesystem and command boundaries narrow. |
+| Explain the workflow | Notes | Notes document context but do not enforce behavior or execute. |
 
 ## Read a node page
 

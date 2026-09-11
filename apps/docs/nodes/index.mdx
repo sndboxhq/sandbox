@@ -4,7 +4,7 @@ description: "Every node currently implemented in sndbox, generated from the pro
 icon: "blocks"
 ---
 
-sndbox currently implements **54 built-in nodes** across triggers, logic, data, network, browser, communication, and system automation. These pages are generated from `src/catalogue.ts`; names, type IDs, defaults, typed ports, side-effect flags, and supported placements are not hand-copied.
+sndbox currently implements **55 built-in nodes** across triggers, logic, data, network, browser, communication, and system automation. These pages are generated from `src/catalogue.ts`; names, type IDs, defaults, typed ports, side-effect flags, and supported placements are not hand-copied.
 
 <Tip>
   Start with a trigger, connect compatible ports, and map outputs into later node fields. The node inspector only shows settings implemented by that node.
@@ -41,6 +41,7 @@ Drawing an edge does not automatically map every output. Open the destination no
 | Interact with a site | Browser | Open a managed session first and prefer recorded accessible locators. |
 | Send or modify messages | Communication | Credentials stay in connections; mutations require permission review. |
 | Change the local system | System | Keep filesystem and command boundaries narrow. |
+| Explain the workflow | Notes | Notes document context but do not enforce behavior or execute. |
 
 ## Read a node page
 
@@ -239,4 +240,10 @@ The **Default node configuration** block is the exact generated storage shape. *
 </Card>
 <Card title="Web Builder" icon="terminal" href="/nodes/web-builder">
   Combine HTML, JavaScript, and CSS into a localhost site.
+</Card>
+
+## Notes
+
+<Card title="Note" icon="sticky-note" href="/nodes/note">
+  Place setup instructions or context on the canvas.
 </Card>
