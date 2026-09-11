@@ -96,6 +96,7 @@ function dynamicOutputPorts(node:WorkflowNode):Array<{id:string;label:string}>|u
   if(node.type==="split_out")return [{id:"output",label:"Items"},{id:"rejected",label:"Rejected"},...error];
   if(node.type==="loop_over_items")return [{id:"loop",label:"Loop"},{id:"done",label:"Done"},...error];
   if(node.type==="remove_duplicates")return [{id:"output",label:"Unique"},{id:"duplicates",label:"Duplicates"},...error];
+  if(node.type==="validate_schema")return [{id:"valid",label:"Valid"},{id:"invalid",label:"Invalid"},...error];
   if(error.length)return[{id:"output",label:"Output"},...error];
   return undefined;
 }

@@ -27,6 +27,8 @@
     "browser:build": "npm run build --prefix browser-sidecar",
     "browser:test": "npm run test --prefix browser-sidecar",
     "contracts:build": "npm run build --workspace @sandbox/contracts",
+    "node-contracts:write": "node scripts/check-node-contracts.mjs --write",
+    "node-contracts:check": "node scripts/check-node-contracts.mjs",
     "api-client:build": "npm run build --workspace @sandbox/api-client",
     "control-plane:build": "npm run build --workspace @sandbox/control-plane",
     "control-plane:test": "npm run test --workspace @sandbox/control-plane",

@@ -17,6 +17,7 @@ import { ReadinessService, ServiceMetrics } from "./reliability.js";
 import type { SupportAccessAdministration,SupportAccessRequest } from "./support_access.js";
 import type { PrivacyAdministration,WorkspaceRetentionPolicy } from "./privacy.js";
 import type { ReferralAdministration,ReferralSummary } from "./referrals.js";
+import type { CollaborationService } from "./collaboration.js";
 
 const session: AuthenticatedSession = {
   accountId: "11111111-1111-4111-8111-111111111111",
@@ -70,6 +71,59 @@ function dependencies(permissions: string[]) {
 }
 
 describe("control-plane API", () => {
+  it("coordinates encrypted workflow collaboration behind workflow permissions", async () => {
+    const workflowId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const collaborationSessionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const deviceId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const operationId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const now = new Date().toISOString();
+    const encryptedPayload = Buffer.alloc(32, 7).toString("base64");
+    const payloadHash = `sha256:${"a".repeat(64)}`;
+    const collaboration: CollaborationService = {
+      join: vi.fn(async () => ({ sessionId: collaborationSessionId, workspaceId, workflowId, latestSequence: 0, joinedAt: now, expiresAt: new Date(Date.now() + 60_000).toISOString() })),
+      append: vi.fn(async (_actor, _workspace, _workflow, sessionId, input) => ({ ...input, sessionId, workflowId, actorAccountId: session.accountId, sequence: 1, acceptedAt: now })),
+      operations: vi.fn(async () => ({ items: [], latestSequence: 1 })),
+      heartbeat: vi.fn(async () => undefined),
+      presence: vi.fn(async () => [{ accountId: session.accountId, deviceId, displayName: "One", color: "#5b8def", encryptedPresence: encryptedPayload, lastSeenAt: now }]),
+      leave: vi.fn(async () => undefined),
+    };
+    const server = await createServer({ ...dependencies(["workflows.edit", "workflows.view"]), collaboration });
+    const freshHeaders = { authorization: "Bearer token", "x-sandbox-request-time": now };
+    const baseUrl = `/v1/workspaces/${workspaceId}/workflows/${workflowId}/collaboration`;
+    const started = await server.inject({ method: "POST", url: `${baseUrl}/sessions`, headers: freshHeaders, payload: { deviceId, color: "#5b8def" } });
+    expect(started.statusCode, started.body).toBe(200);
+    expect(started.json().session).toMatchObject({ sessionId: collaborationSessionId, workflowId });
+    const operationInput = { operationId, baseSequence: 0, clientSequence: 1, encryptedPayload, payloadHash, createdAt: now };
+    const appended = await server.inject({ method: "POST", url: `${baseUrl}/sessions/${collaborationSessionId}/operations`, headers: { authorization: "Bearer token" }, payload: operationInput });
+    expect(appended.statusCode, appended.body).toBe(200);
+    expect(collaboration.append).toHaveBeenCalledWith(session, workspaceId, workflowId, collaborationSessionId, operationInput);
+    const polled = await server.inject({ method: "GET", url: `${baseUrl}/sessions/${collaborationSessionId}/operations?after=0&limit=50`, headers: { authorization: "Bearer token" } });
+    expect(polled.statusCode, polled.body).toBe(200);
+    expect(collaboration.operations).toHaveBeenCalledWith(session, workspaceId, workflowId, collaborationSessionId, 0, 50);
+    const presence = await server.inject({ method: "PUT", url: `${baseUrl}/sessions/${collaborationSessionId}/presence`, headers: { authorization: "Bearer token" }, payload: { deviceId, color: "#5b8def", encryptedPresence: encryptedPayload } });
+    expect(presence.statusCode, presence.body).toBe(200);
+    expect(collaboration.heartbeat).toHaveBeenCalledWith(session, workspaceId, workflowId, collaborationSessionId, deviceId, "#5b8def", encryptedPayload);
+    const listed = await server.inject({ method: "GET", url: `${baseUrl}/sessions/${collaborationSessionId}/presence`, headers: { authorization: "Bearer token" } });
+    expect(listed.statusCode, listed.body).toBe(200);
+    expect(listed.json().items).toHaveLength(1);
+    const left = await server.inject({ method: "DELETE", url: `${baseUrl}/sessions/${collaborationSessionId}/members/${deviceId}`, headers: freshHeaders });
+    expect(left.statusCode, left.body).toBe(200);
+    expect(collaboration.leave).toHaveBeenCalledWith(session, workspaceId, workflowId, collaborationSessionId, deviceId);
+    await server.close();
+  });
+
+  it("does not expose collaboration when workflow edit permission is absent", async () => {
+    const workflowId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const deviceId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const join = vi.fn();
+    const collaboration = { join } as unknown as CollaborationService;
+    const server = await createServer({ ...dependencies(["workflows.view"]), collaboration });
+    const response = await server.inject({ method: "POST", url: `/v1/workspaces/${workspaceId}/workflows/${workflowId}/collaboration/sessions`, headers: { authorization: "Bearer token", "x-sandbox-request-time": new Date().toISOString() }, payload: { deviceId, color: "#5b8def" } });
+    expect(response.statusCode).toBe(403);
+    expect(join).not.toHaveBeenCalled();
+    await server.close();
+  });
+
   it("exposes and claims referrals only through an authenticated human account",async()=>{
     const now=new Date().toISOString();
     const summary:ReferralSummary={code:"abcdef123456",shareUrl:"https://app.sandbox.test/r/abcdef123456",policy:{claimWindowDays:7,qualifyingTopUpCents:1_000,rewardMicros:5_000_000,maximumRewardsPerRollingYear:50},stats:{invited:1,pending:1,rewarded:0,earnedMicros:0},claim:null,referrals:[{id:"33333333-3333-4333-8333-333333333333",status:"pending",claimedAt:now,rewardedAt:null,reversedAt:null}]};

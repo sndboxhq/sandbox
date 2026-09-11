@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
-import { executionTargetSchema, hasPermission, permissions, runnerIdentitySchema, runnerRequirementsSchema, runSummarySchema, usageEstimateSchema, workflowRevisionSchema, type Permission, type RunnerCommand } from "@sandbox/contracts";
+import { collaborationOperationInputSchema, collaborationPresenceInputSchema, collaborationSessionJoinSchema, executionTargetSchema, hasPermission, permissions, runnerIdentitySchema, runnerRequirementsSchema, runSummarySchema, usageEstimateSchema, workflowRevisionSchema, type Permission, type RunnerCommand } from "@sandbox/contracts";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { Authorizer } from "./authorization.js";
@@ -26,6 +26,7 @@ import type { PostgresExecutionCoordinator } from "./execution_coordinator.js";
 import type { BugReportSink } from "./bug_reports.js";
 import type { PrepaidBillingAdministration } from "./prepaid.js";
 import type { ReferralAdministration } from "./referrals.js";
+import type { CollaborationService } from "./collaboration.js";
 
 const organisationInput = z.object({ name: z.string().trim().min(2).max(100), slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(63) });
 const invitationInput = z.object({
@@ -185,6 +186,7 @@ export interface ApiDependencies {
   referrals?: ReferralAdministration;
   executionCoordinator?: Pick<PostgresExecutionCoordinator,"enqueue"|"resolvePublicRunDeployment"|"getPublicRun">;
   bugReports?: BugReportSink;
+  collaboration?: CollaborationService;
   webhookBaseUrl?: string;
   webBaseUrl: string;
   logger?: boolean;
@@ -218,6 +220,10 @@ export async function createServer(dependencies: ApiDependencies): Promise<Fasti
     errorResponseBuilder: (_request, context) => ({ statusCode: context.statusCode, code: "FST_RATE_LIMIT" })
   });
   const authorizer = new Authorizer(dependencies.repository);
+  const collaboration = (): CollaborationService => {
+    if (!dependencies.collaboration) throw new DomainError("collaboration_unavailable", "Live workflow collaboration is not available on this control plane.", 503);
+    return dependencies.collaboration;
+  };
   const idempotencyContexts = new WeakMap<FastifyRequest, { scope: string; key: string; ownerToken: string }>();
 
   app.setErrorHandler((error, request, reply) => {
@@ -1182,6 +1188,60 @@ export async function createServer(dependencies: ApiDependencies): Promise<Fasti
     await authorizer.require(session, workspaceId, "workflows.edit");
     const { revisionId } = syncConflictResolutionInput.parse(request.body);
     return dependencies.repository.resolveSyncConflict(session, workspaceId, workflowId, revisionId, request.id);
+  });
+
+  app.post("/v1/workspaces/:workspaceId/workflows/:workflowId/collaboration/sessions", async request => {
+    const session = await authenticate(request, dependencies.sessions);
+    requireHumanPrincipal(session);
+    requireFreshRequest(request);
+    const { workspaceId, workflowId } = z.object({ workspaceId: z.string().uuid(), workflowId: z.string().uuid() }).parse(request.params);
+    await authorizer.require(session, workspaceId, "workflows.edit");
+    return { session: await collaboration().join(session, workspaceId, workflowId, collaborationSessionJoinSchema.parse(request.body)) };
+  });
+
+  app.post("/v1/workspaces/:workspaceId/workflows/:workflowId/collaboration/sessions/:sessionId/operations", async request => {
+    const session = await authenticate(request, dependencies.sessions);
+    requireHumanPrincipal(session);
+    const { workspaceId, workflowId, sessionId } = z.object({ workspaceId: z.string().uuid(), workflowId: z.string().uuid(), sessionId: z.string().uuid() }).parse(request.params);
+    await authorizer.require(session, workspaceId, "workflows.edit");
+    return { operation: await collaboration().append(session, workspaceId, workflowId, sessionId, collaborationOperationInputSchema.parse(request.body)) };
+  });
+
+  app.get("/v1/workspaces/:workspaceId/workflows/:workflowId/collaboration/sessions/:sessionId/operations", async request => {
+    const session = await authenticate(request, dependencies.sessions);
+    requireHumanPrincipal(session);
+    const { workspaceId, workflowId, sessionId } = z.object({ workspaceId: z.string().uuid(), workflowId: z.string().uuid(), sessionId: z.string().uuid() }).parse(request.params);
+    const { after, limit } = z.object({ after: z.coerce.number().int().nonnegative().default(0), limit: z.coerce.number().int().min(1).max(250).default(100) }).parse(request.query);
+    await authorizer.require(session, workspaceId, "workflows.view");
+    return collaboration().operations(session, workspaceId, workflowId, sessionId, after, limit);
+  });
+
+  app.put("/v1/workspaces/:workspaceId/workflows/:workflowId/collaboration/sessions/:sessionId/presence", async request => {
+    const session = await authenticate(request, dependencies.sessions);
+    requireHumanPrincipal(session);
+    const { workspaceId, workflowId, sessionId } = z.object({ workspaceId: z.string().uuid(), workflowId: z.string().uuid(), sessionId: z.string().uuid() }).parse(request.params);
+    const input = collaborationPresenceInputSchema.parse(request.body);
+    await authorizer.require(session, workspaceId, "workflows.view");
+    await collaboration().heartbeat(session, workspaceId, workflowId, sessionId, input.deviceId, input.color, input.encryptedPresence);
+    return { accepted: true };
+  });
+
+  app.get("/v1/workspaces/:workspaceId/workflows/:workflowId/collaboration/sessions/:sessionId/presence", async request => {
+    const session = await authenticate(request, dependencies.sessions);
+    requireHumanPrincipal(session);
+    const { workspaceId, workflowId, sessionId } = z.object({ workspaceId: z.string().uuid(), workflowId: z.string().uuid(), sessionId: z.string().uuid() }).parse(request.params);
+    await authorizer.require(session, workspaceId, "workflows.view");
+    return { items: await collaboration().presence(session, workspaceId, workflowId, sessionId) };
+  });
+
+  app.delete("/v1/workspaces/:workspaceId/workflows/:workflowId/collaboration/sessions/:sessionId/members/:deviceId", async request => {
+    const session = await authenticate(request, dependencies.sessions);
+    requireHumanPrincipal(session);
+    requireFreshRequest(request);
+    const { workspaceId, workflowId, sessionId, deviceId } = z.object({ workspaceId: z.string().uuid(), workflowId: z.string().uuid(), sessionId: z.string().uuid(), deviceId: z.string().uuid() }).parse(request.params);
+    await authorizer.require(session, workspaceId, "workflows.view");
+    await collaboration().leave(session, workspaceId, workflowId, sessionId, deviceId);
+    return { left: true };
   });
 
   app.post("/v1/workspaces/:workspaceId/workflows/:workflowId/revisions/:revisionId/request-approval", async request => {

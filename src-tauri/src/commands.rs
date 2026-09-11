@@ -7,20 +7,20 @@ use crate::{
 use chrono::{DateTime, Utc};
 use reqwest::Method;
 use sandbox_engine::{
-    custom_node_fingerprint, gate_node, node_contracts, CustomNodeVerification,
-    NodeContract, NodeGate,
+    custom_node_fingerprint, gate_node_in_workflow, node_contracts,
     validation::{validate, ValidationIssue},
-    BrowserProfile, BrowserProfileSettings, ConnectionMetadata, ConnectionStatus, ExecutionRecord,
-    InputBinding, InstalledPlugin, PendingApproval, PermissionSummary, StructuredLocator, Workflow,
-    WorkflowMetadataPatch, WorkflowRevisionSummary, WorkflowSummary,
+    BrowserProfile, BrowserProfileSettings, ConnectionMetadata, ConnectionStatus,
+    CustomNodeVerification, ExecutionRecord, InputBinding, InstalledPlugin, NodeContract, NodeGate,
+    PendingApproval, PermissionSummary, StructuredLocator, Workflow, WorkflowMetadataPatch,
+    WorkflowRevisionSummary, WorkflowSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::hash_map::Entry;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -153,11 +153,24 @@ pub fn initialize_desktop_integration(app: &AppHandle, database: &sandbox_engine
 
 pub fn show_quick_launcher(app: &AppHandle) -> std::result::Result<(), String> {
     if let Some(window) = app.get_webview_window("quick-launcher") {
-        window.show().map_err(err)?; window.unminimize().map_err(err)?; window.set_focus().map_err(err)?; return Ok(());
+        window.show().map_err(err)?;
+        window.unminimize().map_err(err)?;
+        window.set_focus().map_err(err)?;
+        return Ok(());
     }
-    WebviewWindowBuilder::new(app, "quick-launcher", WebviewUrl::App("index.html?window=quick-launcher".into()))
-        .title("sndbox quick launcher").inner_size(520.0,420.0).min_inner_size(420.0,320.0)
-        .resizable(true).decorations(true).always_on_top(true).build().map_err(err)?;
+    WebviewWindowBuilder::new(
+        app,
+        "quick-launcher",
+        WebviewUrl::App("index.html?window=quick-launcher".into()),
+    )
+    .title("sndbox quick launcher")
+    .inner_size(520.0, 420.0)
+    .min_inner_size(420.0, 320.0)
+    .resizable(true)
+    .decorations(true)
+    .always_on_top(true)
+    .build()
+    .map_err(err)?;
     Ok(())
 }
 
@@ -183,24 +196,64 @@ pub fn reveal_workflow(workflow_id: String, app: AppHandle) -> Result<()> {
 }
 
 #[tauri::command]
-pub fn desktop_integration_settings(app: AppHandle, state: State<'_, AppState>) -> Result<DesktopIntegrationSettings> {
-    let mut settings=state.engine.database().get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY).map_err(err)?.unwrap_or_default();
-    settings.start_at_login=app.autolaunch().is_enabled().unwrap_or(settings.start_at_login);
+pub fn desktop_integration_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DesktopIntegrationSettings> {
+    let mut settings = state
+        .engine
+        .database()
+        .get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY)
+        .map_err(err)?
+        .unwrap_or_default();
+    settings.start_at_login = app
+        .autolaunch()
+        .is_enabled()
+        .unwrap_or(settings.start_at_login);
     Ok(settings)
 }
 
 #[tauri::command]
-pub fn set_desktop_integration_settings(next: DesktopIntegrationSettings, app: AppHandle, state: State<'_, AppState>) -> Result<DesktopIntegrationSettings> {
-    let previous=state.engine.database().get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY).map_err(err)?.unwrap_or_default();
+pub fn set_desktop_integration_settings(
+    next: DesktopIntegrationSettings,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DesktopIntegrationSettings> {
+    let previous = state
+        .engine
+        .database()
+        .get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY)
+        .map_err(err)?
+        .unwrap_or_default();
     if next.shortcut_enabled && (!previous.shortcut_enabled || next.shortcut != previous.shortcut) {
-        app.global_shortcut().register(next.shortcut.as_str()).map_err(|error| format!("Could not register '{}': {error}. The previous shortcut remains active.",next.shortcut))?;
+        app.global_shortcut()
+            .register(next.shortcut.as_str())
+            .map_err(|error| {
+                format!(
+                    "Could not register '{}': {error}. The previous shortcut remains active.",
+                    next.shortcut
+                )
+            })?;
     }
     if previous.shortcut_enabled && (!next.shortcut_enabled || next.shortcut != previous.shortcut) {
-        let _=app.global_shortcut().unregister(previous.shortcut.as_str());
+        let _ = app.global_shortcut().unregister(previous.shortcut.as_str());
     }
-    if next.start_at_login { app.autolaunch().enable().map_err(err)?; } else { app.autolaunch().disable().map_err(err)?; }
-    let saved=DesktopIntegrationSettings{shortcut:next.shortcut.trim().to_string(),shortcut_enabled:next.shortcut_enabled,start_at_login:next.start_at_login,shortcut_error:None};
-    state.engine.database().set_setting(DESKTOP_INTEGRATION_KEY,&saved).map_err(err)?;
+    if next.start_at_login {
+        app.autolaunch().enable().map_err(err)?;
+    } else {
+        app.autolaunch().disable().map_err(err)?;
+    }
+    let saved = DesktopIntegrationSettings {
+        shortcut: next.shortcut.trim().to_string(),
+        shortcut_enabled: next.shortcut_enabled,
+        start_at_login: next.start_at_login,
+        shortcut_error: None,
+    };
+    state
+        .engine
+        .database()
+        .set_setting(DESKTOP_INTEGRATION_KEY, &saved)
+        .map_err(err)?;
     Ok(saved)
 }
 
@@ -1074,9 +1127,7 @@ fn is_workflow_file(path: &std::path::Path) -> bool {
     name.ends_with(".sndbox") || name.ends_with(".sandbox-workflow.json")
 }
 
-fn prepare_workflow_import(
-    path: &std::path::Path,
-) -> Result<(WorkflowImportInspection, Workflow)> {
+fn prepare_workflow_import(path: &std::path::Path) -> Result<(WorkflowImportInspection, Workflow)> {
     if !is_workflow_file(path) {
         return Err("Choose a .sndbox or legacy .sandbox-workflow.json file.".into());
     }
@@ -1134,7 +1185,9 @@ fn prepare_workflow_import(
     workflow.trigger_node_id = node_ids
         .get(&workflow.trigger_node_id)
         .cloned()
-        .ok_or_else(|| "The imported trigger does not correspond to a workflow node.".to_string())?;
+        .ok_or_else(|| {
+            "The imported trigger does not correspond to a workflow node.".to_string()
+        })?;
     for node in &mut workflow.nodes {
         node.id = node_ids
             .get(&node.id)
@@ -1186,10 +1239,8 @@ fn prepare_workflow_import(
         .filter_map(Value::as_str)
         .map(str::to_string)
         .collect::<Vec<_>>();
-    warnings.push(
-        "The imported workflow is disabled and all inherited approvals were cleared."
-            .into(),
-    );
+    warnings
+        .push("The imported workflow is disabled and all inherited approvals were cleared.".into());
     if workflow
         .nodes
         .iter()
@@ -1264,11 +1315,7 @@ pub fn confirm_workflow_import(
         .lock()
         .remove(&inspection_id)
         .ok_or_else(|| "This import inspection expired. Inspect the file again.".to_string())?;
-    state
-        .engine
-        .database()
-        .save_workflow(workflow)
-        .map_err(err)
+    state.engine.database().save_workflow(workflow).map_err(err)
 }
 
 #[tauri::command]
@@ -1301,7 +1348,7 @@ pub fn evaluate_node_gates(
         .nodes
         .iter()
         .map(|node| {
-            let mut gate = gate_node(node, &placement);
+            let mut gate = gate_node_in_workflow(node, &workflow, &placement);
             if gate.state == sandbox_engine::GateState::Available
                 && node.node_type == "custom_function"
             {
@@ -1361,61 +1408,168 @@ pub async fn test_custom_node(
     node_id: String,
     state: State<'_, AppState>,
 ) -> Result<CustomNodeTestReport> {
-    if state.engine.database().get_workflow(&workflow.id).map_err(err)?.is_none() {
+    if state
+        .engine
+        .database()
+        .get_workflow(&workflow.id)
+        .map_err(err)?
+        .is_none()
+    {
         return Err("Save the workflow before verifying its custom node.".into());
     }
-    let node = workflow.nodes.iter().find(|node| node.id == node_id).cloned().ok_or_else(|| "Custom node no longer exists.".to_string())?;
-    if node.node_type != "custom_function" { return Err("Only custom ƒx nodes use the custom verification suite.".into()); }
-    let customization = node.customization.clone().ok_or_else(|| "Custom contract is missing.".to_string())?;
+    let node = workflow
+        .nodes
+        .iter()
+        .find(|node| node.id == node_id)
+        .cloned()
+        .ok_or_else(|| "Custom node no longer exists.".to_string())?;
+    if node.node_type != "custom_function" {
+        return Err("Only custom ƒx nodes use the custom verification suite.".into());
+    }
+    let customization = node
+        .customization
+        .clone()
+        .ok_or_else(|| "Custom contract is missing.".to_string())?;
     let fingerprint = custom_node_fingerprint(&customization);
     let mut fixture_results = Vec::new();
     let mut output_coverage = std::collections::BTreeSet::new();
     let mut branch_coverage = std::collections::BTreeSet::new();
     for fixture in &customization.tests {
-        let execution = state.engine.test_node(
-            workflow.clone(), &node_id,
-            json!({"input":{"items":fixture.items},"fixtureInputs":fixture.inputs}),
-            None, false, CancellationToken::new()
-        ).await;
+        let execution = state
+            .engine
+            .test_node(
+                workflow.clone(),
+                &node_id,
+                json!({"input":{"items":fixture.items},"fixtureInputs":fixture.inputs}),
+                None,
+                false,
+                CancellationToken::new(),
+            )
+            .await;
         let (passed, duration_ms, logs, actual_error) = match execution {
             Ok(record) => {
                 let node_run = record.node_executions.first();
-                let error_text = node_run.and_then(|run| run.error.as_ref()).map(|error| format!("{}: {}", error.code, error.message));
-                let expected_error_ok = match &fixture.expected_error { Some(expected) => error_text.as_ref().is_some_and(|actual| actual.contains(expected)), None => error_text.is_none() };
+                let error_text = node_run
+                    .and_then(|run| run.error.as_ref())
+                    .map(|error| format!("{}: {}", error.code, error.message));
+                let expected_error_ok = match &fixture.expected_error {
+                    Some(expected) => error_text
+                        .as_ref()
+                        .is_some_and(|actual| actual.contains(expected)),
+                    None => error_text.is_none(),
+                };
                 let actual_output = node_run.map(|run| &run.output).unwrap_or(&Value::Null);
-                let expected_output_ok = fixture.expected_outputs.as_object().is_some_and(|expected| expected.iter().all(|(key, value)| actual_output.get(key) == Some(value)));
-                let branch_counts = node_run.and_then(|run| run.collection.as_ref()).map(|collection| &collection.branch_counts);
-                let expected_branch_ok = fixture.expected_branches.as_object().is_some_and(|expected| expected.keys().all(|key| branch_counts.is_some_and(|counts| counts.get(key).copied().unwrap_or(0) > 0)));
+                let expected_output_ok =
+                    fixture
+                        .expected_outputs
+                        .as_object()
+                        .is_some_and(|expected| {
+                            expected
+                                .iter()
+                                .all(|(key, value)| actual_output.get(key) == Some(value))
+                        });
+                let branch_counts = node_run
+                    .and_then(|run| run.collection.as_ref())
+                    .map(|collection| &collection.branch_counts);
+                let expected_branch_ok =
+                    fixture
+                        .expected_branches
+                        .as_object()
+                        .is_some_and(|expected| {
+                            expected.keys().all(|key| {
+                                branch_counts
+                                    .is_some_and(|counts| counts.get(key).copied().unwrap_or(0) > 0)
+                            })
+                        });
                 if expected_error_ok && expected_output_ok && expected_branch_ok {
-                    if let Some(expected) = fixture.expected_outputs.as_object() { output_coverage.extend(expected.keys().cloned()); }
-                    if let Some(expected) = fixture.expected_branches.as_object() { branch_coverage.extend(expected.keys().cloned()); }
+                    if let Some(expected) = fixture.expected_outputs.as_object() {
+                        output_coverage.extend(expected.keys().cloned());
+                    }
+                    if let Some(expected) = fixture.expected_branches.as_object() {
+                        branch_coverage.extend(expected.keys().cloned());
+                    }
                 }
-                (expected_error_ok && expected_output_ok && expected_branch_ok, record.duration_ms.unwrap_or(0), node_run.map(|run| run.logs.clone()).unwrap_or_default(), error_text)
+                (
+                    expected_error_ok && expected_output_ok && expected_branch_ok,
+                    record.duration_ms.unwrap_or(0),
+                    node_run.map(|run| run.logs.clone()).unwrap_or_default(),
+                    error_text,
+                )
             }
             Err(error) => {
-                let matches = fixture.expected_error.as_ref().is_some_and(|expected| error.to_string().contains(expected));
+                let matches = fixture
+                    .expected_error
+                    .as_ref()
+                    .is_some_and(|expected| error.to_string().contains(expected));
                 (matches, 0, vec![], Some(error.to_string()))
             }
         };
-        fixture_results.push(CustomFixtureResult { id: fixture.id.clone(), name: fixture.name.clone(), passed, duration_ms, logs, error: actual_error });
+        fixture_results.push(CustomFixtureResult {
+            id: fixture.id.clone(),
+            name: fixture.name.clone(),
+            passed,
+            duration_ms,
+            logs,
+            error: actual_error,
+        });
     }
-    let coverage_complete = customization.outputs.iter().filter(|port| port.required).all(|port| output_coverage.contains(&port.key))
-        && customization.branches.iter().all(|port| branch_coverage.contains(&port.key));
-    let passed = !fixture_results.is_empty() && fixture_results.iter().all(|fixture| fixture.passed) && coverage_complete;
+    let coverage_complete = customization
+        .outputs
+        .iter()
+        .filter(|port| port.required)
+        .all(|port| output_coverage.contains(&port.key))
+        && customization
+            .branches
+            .iter()
+            .all(|port| branch_coverage.contains(&port.key));
+    let passed = !fixture_results.is_empty()
+        && fixture_results.iter().all(|fixture| fixture.passed)
+        && coverage_complete;
     let verification = if passed {
-        let receipt = CustomNodeVerification { workflow_id: workflow.id.clone(), node_id: node_id.clone(), fingerprint: fingerprint.clone(), passed_at: Utc::now(), output_coverage: output_coverage.iter().cloned().collect(), branch_coverage: branch_coverage.iter().cloned().collect(), runtime_version: customization.runtime_requirement.clone() };
-        state.engine.database().save_custom_node_verification(&receipt).map_err(err)?;
+        let receipt = CustomNodeVerification {
+            workflow_id: workflow.id.clone(),
+            node_id: node_id.clone(),
+            fingerprint: fingerprint.clone(),
+            passed_at: Utc::now(),
+            output_coverage: output_coverage.iter().cloned().collect(),
+            branch_coverage: branch_coverage.iter().cloned().collect(),
+            runtime_version: customization.runtime_requirement.clone(),
+        };
+        state
+            .engine
+            .database()
+            .save_custom_node_verification(&receipt)
+            .map_err(err)?;
         Some(receipt)
     } else {
-        state.engine.database().clear_custom_node_verification(&workflow.id, &node_id).map_err(err)?;
+        state
+            .engine
+            .database()
+            .clear_custom_node_verification(&workflow.id, &node_id)
+            .map_err(err)?;
         None
     };
-    Ok(CustomNodeTestReport { passed, fingerprint, output_coverage: output_coverage.into_iter().collect(), branch_coverage: branch_coverage.into_iter().collect(), fixtures: fixture_results, verification })
+    Ok(CustomNodeTestReport {
+        passed,
+        fingerprint,
+        output_coverage: output_coverage.into_iter().collect(),
+        branch_coverage: branch_coverage.into_iter().collect(),
+        fixtures: fixture_results,
+        verification,
+    })
 }
 
 #[tauri::command]
-pub fn get_custom_node_verification(workflow_id: String, node_id: String, state: State<'_, AppState>) -> Result<Option<CustomNodeVerification>> {
-    state.engine.database().custom_node_verification(&workflow_id, &node_id).map_err(err)
+pub fn get_custom_node_verification(
+    workflow_id: String,
+    node_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<CustomNodeVerification>> {
+    state
+        .engine
+        .database()
+        .custom_node_verification(&workflow_id, &node_id)
+        .map_err(err)
 }
 
 #[tauri::command]

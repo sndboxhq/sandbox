@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Bot, Braces, Code2, ExternalLink, FolderOpen, LocateFixed, Pencil, RefreshCcw, Trash2 } from "lucide-react";
+import { Bot, Braces, Code2, ExternalLink, FolderOpen, LayoutTemplate, LocateFixed, Pencil, RefreshCcw, Trash2, Unlink } from "lucide-react";
 import {
   Children,
   cloneElement,
@@ -63,7 +63,9 @@ export function NodeInspector({
   issues = [],
   onChange,
   onDelete,
+  onUnlink,
   onCustomize,
+  onSendToWebBuilder,
   sampleRun,
   testDataExecutions = [],
   testDataExecutionId = "",
@@ -74,7 +76,9 @@ export function NodeInspector({
   issues?: ValidationIssue[];
   onChange: (node: WorkflowNode, workflowPatch?: Partial<Workflow>) => void;
   onDelete: () => void;
+  onUnlink: () => void;
   onCustomize?: () => void;
+  onSendToWebBuilder?: () => void;
   sampleRun?: ExecutionRecord;
   testDataExecutions?: ExecutionRecord[];
   testDataExecutionId?: string;
@@ -546,6 +550,39 @@ export function NodeInspector({
             value={config.values ?? {}}
             onChange={(value) => set("values", value)}
           />
+        )}
+        {node.type === "map_fields" && (
+          <>
+            <JsonField
+              label="Field mappings"
+              value={config.mappings ?? []}
+              onChange={(value) => set("mappings", value)}
+            />
+            <label className="toggle-row">
+              <span><b>Preserve unmapped fields</b><small>Off creates a clean projected object; on starts with the original object.</small></span>
+              <input type="checkbox" checked={Boolean(config.preserveUnmapped)} onChange={(event) => set("preserveUnmapped", event.target.checked)} />
+            </label>
+            <Info>Each mapping uses <code>source</code>, <code>target</code>, optional <code>default</code>, and <code>required</code>. Dotted paths create nested objects.</Info>
+          </>
+        )}
+        {node.type === "validate_schema" && (
+          <>
+            <JsonField
+              label="Field rules"
+              value={config.rules ?? []}
+              onChange={(value) => set("rules", value)}
+            />
+            <Info>Supported types are any, null, boolean, number, string, array, and object. Connect the Valid and Invalid outputs to make recovery explicit.</Info>
+          </>
+        )}
+        {node.type === "text_template" && (
+          <>
+            {mapping("template", "Template", { multiline: true })}
+            <Info>Uses the safe expression language. Try <code>{"{{input.name}}"}</code> or a reachable upstream node output.</Info>
+          </>
+        )}
+        {node.type === "hash_data" && (
+          <Info>Produces a stable hexadecimal SHA-256 digest after recursively sorting JSON object keys. No source value is included in logs.</Info>
         )}
         {node.type === "delay" && (
           <>
@@ -1572,6 +1609,11 @@ export function NodeInspector({
           <Trash2 size={14} />
           Delete node
         </button>
+        <button className="button" onClick={onUnlink} title="Remove every incoming and outgoing connection while keeping this node">
+          <Unlink size={14}/>
+          Unlink
+        </button>
+        {onSendToWebBuilder&&<button className="button" onClick={onSendToWebBuilder}><LayoutTemplate size={14}/>Build site</button>}
         {onCustomize&&<button className="button" onClick={onCustomize}><Code2 size={14}/>{node.type==="custom_function"?"Open ƒx editor":"Create custom version"}</button>}
       </div>
       {isCodeNode(node.type) && (

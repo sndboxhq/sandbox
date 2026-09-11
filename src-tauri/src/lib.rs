@@ -2,6 +2,7 @@ mod account_auth;
 mod ai_builder;
 mod browser_sidecar;
 mod bundled_plugins;
+mod collaboration;
 mod commands;
 mod credential_vault;
 mod integrations;
@@ -32,9 +33,9 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_global_shortcut::ShortcutState;
 use tokio_util::sync::CancellationToken;
 
 pub struct TauriHost {
@@ -260,6 +261,7 @@ pub struct AppState {
     pub plugin_manager: plugin_manager::PluginManager,
     pub provider_adapter: Arc<provider_adapter::ProviderOperationAdapter>,
     pub sync_crypto: sync_crypto::WorkflowSyncCrypto,
+    pub collaboration_crypto: collaboration::CollaborationCrypto,
     pub pending_deep_links: Arc<Mutex<Vec<String>>>,
     pub pending_workflow_files: Arc<Mutex<Vec<String>>>,
     pub pending_workflow_imports: Arc<Mutex<HashMap<String, Workflow>>>,
@@ -330,6 +332,8 @@ pub fn run() {
             .map_err(|error| error.to_string())?;
             bundled_plugins::install(&plugin_manager).map_err(|error| error.to_string())?;
             let sync_crypto = sync_crypto::WorkflowSyncCrypto::new(credential_vault.clone());
+            let collaboration_crypto =
+                collaboration::CollaborationCrypto::new(credential_vault.clone());
             let pending_deep_links = Arc::new(Mutex::new(
                 app.deep_link()
                     .get_current()?
@@ -339,9 +343,8 @@ pub fn run() {
                     .collect(),
             ));
             let startup_arguments = std::env::args().collect::<Vec<_>>();
-            let pending_workflow_files = Arc::new(Mutex::new(workflow_file_arguments(
-                &startup_arguments,
-            )));
+            let pending_workflow_files =
+                Arc::new(Mutex::new(workflow_file_arguments(&startup_arguments)));
             let sidecar_for_verify = browser_sidecar.clone();
             tauri::async_runtime::block_on(async {
                 let _ = sidecar_for_verify.verify().await;
@@ -368,6 +371,7 @@ pub fn run() {
                 plugin_manager,
                 provider_adapter,
                 sync_crypto,
+                collaboration_crypto,
                 pending_deep_links,
                 pending_workflow_files,
                 pending_workflow_imports: Arc::new(Mutex::new(HashMap::new())),

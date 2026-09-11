@@ -87,6 +87,54 @@ export const workflowRevisionSchema = z.object({
 });
 export type WorkflowRevision = z.infer<typeof workflowRevisionSchema>;
 
+export const collaborationOperationInputSchema = z.object({
+  operationId: idSchema,
+  baseSequence: z.number().int().nonnegative(),
+  clientSequence: z.number().int().nonnegative(),
+  encryptedPayload: z.string().base64().min(20).max(1_500_000),
+  payloadHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  createdAt: z.string().datetime(),
+}).strict();
+export type CollaborationOperationInput = z.infer<typeof collaborationOperationInputSchema>;
+
+export const collaborationOperationSchema = collaborationOperationInputSchema.extend({
+  sessionId: idSchema,
+  workflowId: idSchema,
+  actorAccountId: idSchema,
+  sequence: z.number().int().positive(),
+  acceptedAt: z.string().datetime(),
+}).strict();
+export type CollaborationOperation = z.infer<typeof collaborationOperationSchema>;
+
+export const collaborationSessionJoinSchema = z.object({
+  sessionId: idSchema.optional(),
+  deviceId: idSchema,
+  color: z.string().regex(/^#[a-f0-9]{6}$/i),
+}).strict();
+
+export const collaborationSessionSchema = z.object({
+  sessionId: idSchema,
+  workspaceId: idSchema,
+  workflowId: idSchema,
+  latestSequence: z.number().int().nonnegative(),
+  joinedAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+}).strict();
+export type CollaborationSession = z.infer<typeof collaborationSessionSchema>;
+
+export const collaborationPresenceInputSchema = z.object({
+  deviceId: idSchema,
+  color: z.string().regex(/^#[a-f0-9]{6}$/i),
+  encryptedPresence: z.string().base64().min(20).max(16_384),
+}).strict();
+
+export const collaborationPresenceSchema = collaborationPresenceInputSchema.extend({
+  accountId: idSchema,
+  displayName: z.string().trim().min(1).max(200),
+  lastSeenAt: z.string().datetime(),
+}).strict();
+export type CollaborationPresence = z.infer<typeof collaborationPresenceSchema>;
+
 export const runnerAuthorizationContextSchema = z.object({
   principalType: z.enum(["user", "personal_access_token", "service_account"]),
   principalId: idSchema,

@@ -163,7 +163,9 @@ pub enum ErrorStrategy {
 }
 
 impl Default for ErrorStrategy {
-    fn default() -> Self { Self::Fail }
+    fn default() -> Self {
+        Self::Fail
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -174,7 +176,9 @@ pub enum RetryBackoff {
 }
 
 impl Default for RetryBackoff {
-    fn default() -> Self { Self::Fixed }
+    fn default() -> Self {
+        Self::Fixed
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -206,7 +210,13 @@ pub struct CustomNodeVerification {
 
 impl Default for NodeErrorPolicy {
     fn default() -> Self {
-        Self { strategy: ErrorStrategy::Fail, max_retries: 0, retry_delay_ms: 0, backoff: RetryBackoff::Fixed, fallback_outputs: Value::Object(Default::default()) }
+        Self {
+            strategy: ErrorStrategy::Fail,
+            max_retries: 0,
+            retry_delay_ms: 0,
+            backoff: RetryBackoff::Fixed,
+            fallback_outputs: Value::Object(Default::default()),
+        }
     }
 }
 

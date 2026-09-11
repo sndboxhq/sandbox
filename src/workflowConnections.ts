@@ -150,12 +150,8 @@ export function disconnectWorkflowEdge(workflow: Workflow, edgeId: string): Work
   if (!edge) return workflow;
 
   const target = workflow.nodes.find((node) => node.id === edge.targetNodeId);
-  const binding = isWebBuilderInput(edge.targetHandle)
-    ? target?.inputBindings?.[edge.targetHandle]
-    : undefined;
+  const binding = target?.inputBindings?.[edge.targetHandle];
   const shouldClearBinding =
-    target?.type === "web_builder" &&
-    isWebBuilderInput(edge.targetHandle) &&
     binding?.kind === "node_output" &&
     binding.nodeId === edge.sourceNodeId;
 

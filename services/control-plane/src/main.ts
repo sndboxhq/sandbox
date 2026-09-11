@@ -23,6 +23,7 @@ import { PostgresExecutionCoordinator } from "./execution_coordinator.js";
 import { DiscordBugReportSink } from "./bug_reports.js";
 import { PostgresPrepaidBilling } from "./prepaid.js";
 import { PostgresReferralProgram } from "./referrals.js";
+import { PostgresCollaborationService } from "./collaboration.js";
 
 const required = (name: string): string => {
   const value = process.env[name];
@@ -111,6 +112,7 @@ const server = await createServer({
   usageProducerAuthenticator: usageProducerConfiguration?new HmacUsageProducerAuthenticator(parseUsageProducerSecrets(usageProducerConfiguration[0])):undefined,
   executionCoordinator: new PostgresExecutionCoordinator(pool),
   bugReports: bugReportConfiguration?new DiscordBugReportSink(bugReportConfiguration[0]):undefined,
+  collaboration: new PostgresCollaborationService(pool),
   readiness,
   metrics,
   metricsBearerToken:required("METRICS_BEARER_TOKEN"),

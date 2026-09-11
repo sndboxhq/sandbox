@@ -1,6 +1,6 @@
 export type BuiltInNodeType =
   | "note"
-  | "manual_trigger" | "schedule_trigger" | "file_watch_trigger" | "condition" | "filter" | "switch" | "loop_over_items" | "split_out" | "aggregate" | "merge" | "remove_duplicates" | "set_data" | "delay"
+  | "manual_trigger" | "schedule_trigger" | "file_watch_trigger" | "condition" | "filter" | "switch" | "loop_over_items" | "split_out" | "aggregate" | "merge" | "remove_duplicates" | "set_data" | "map_fields" | "validate_schema" | "text_template" | "hash_data" | "delay"
   | "http_request" | "desktop_notification" | "move_file" | "read_file" | "write_file" | "copy_path" | "delete_path" | "list_folder" | "parse_csv" | "parse_json" | "parse_text" | "get_workflow_state" | "set_workflow_state" | "compare_previous" | "run_command"
   | "ai_prompt" | "code" | "javascript_code" | "python_code" | "custom_function" | "web_builder"
   | "open_browser" | "navigate" | "click_element" | "fill_field" | "select_option" | "press_key"
@@ -33,6 +33,16 @@ export interface PermissionSummary { approvedFolders:string[]; approvedNetworkDo
 export interface CollectionLimits { maxInputItems:number; maxResultItems:number; maxItemBytes:number; maxAggregateBytes:number; maxCartesianItems:number; maxLoopIterations:number; maxLoopConcurrency:number; maxDeduplicationKeys:number; maxHistoryItemPreviews:number }
 export interface WorkflowSettings { defaultNodeTimeoutMs:number; maxConcurrentNodes:number; permissions:PermissionSummary; expressionLanguageVersion?:number; collectionLimits?:CollectionLimits }
 export interface Workflow { id:string; schemaVersion:number; owner?:WorkflowOwner; name:string; description:string; enabled:boolean; triggerNodeId:string; nodes:WorkflowNode[]; edges:WorkflowEdge[]; settings:WorkflowSettings; createdAt:string; updatedAt:string }
+export type WorkflowCollaborationChange =
+  | { kind:"node_add"; node:WorkflowNode }
+  | { kind:"node_update"; node:WorkflowNode }
+  | { kind:"node_move"; nodeId:string; position:Position }
+  | { kind:"node_remove"; nodeId:string }
+  | { kind:"edge_add"; edge:WorkflowEdge }
+  | { kind:"edge_update"; edge:WorkflowEdge }
+  | { kind:"edge_remove"; edgeId:string }
+  | { kind:"workflow_update"; name:string; description:string; triggerNodeId:string; settings:Omit<WorkflowSettings,"permissions"> };
+export interface WorkflowCollaborationOperation { operationId:string; workflowId:string; actorId:string; baseSequence:number; createdAt:string; changes:WorkflowCollaborationChange[] }
 export interface ExecutionError { code:string; message:string; detail?:string; suggestion?:string; line?:number; column?:number }
 export interface BinaryReference { reference:string; fileName?:string; contentType?:string; sizeBytes?:number; sha256?:string }
 export interface WorkflowItem { itemId?:string; originItemId?:string; parentItemId?:string; data:unknown; binary?:Record<string,BinaryReference>; sourceNodeId?:string; sourceItemIndex?:number; originalPosition?:number; currentPosition?:number; branch?:string; branchHistory?:string[]; loopIteration?:number; executionAttempt?:number; status?:"successful"|"filtered"|"removed"|"failed"|"retried"|"skipped"; trustedPaths?:Record<string,string>; correlations?:Record<string,string> }

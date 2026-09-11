@@ -59,6 +59,7 @@ import { useIssueTracking } from "../issueTracking";
 import {
   connectWorkflowNodes,
   connectedNodeRoles,
+  disconnectWorkflowEdge,
   isValidWorkflowConnection,
   WEB_BUILDER_INPUT_PORTS,
 } from "../workflowConnections";
@@ -66,6 +67,7 @@ import type {
   BrowserProfile,
   ExecutionRecord,
   InstalledPlugin,
+  NodeContract,
   NodeStatus,
   NodeType,
   PermissionSummary,
@@ -75,6 +77,7 @@ import type {
   WorkflowNode,
   WorkflowRevisionSummary,
 } from "../types";
+import "../permissionReview.css";
 import { CustomNodeEditor } from "./CustomNodeEditor";
 import { BrowserRecorder } from "./BrowserRecorder";
 import {
@@ -189,11 +192,12 @@ function workflowOutputHandles(node:WorkflowNode):string[]{
   if(node.type==="filter"||node.type==="split_out")return ["output","rejected",...error];
   if(node.type==="loop_over_items")return ["loop","done",...error];
   if(node.type==="remove_duplicates")return ["output","duplicates",...error];
+  if(node.type==="validate_schema")return ["valid","invalid",...error];
   if(error.length)return["output","error"];
   return [];
 }
 
-const CUSTOMIZABLE_SOURCES=new Set<NodeType>(["condition","filter","switch","split_out","aggregate","merge","remove_duplicates","set_data"]);
+const CUSTOMIZABLE_SOURCES=new Set<NodeType>(["condition","filter","switch","split_out","aggregate","merge","remove_duplicates","set_data","map_fields","validate_schema","text_template","hash_data"]);
 async function contractHash(value:unknown){const bytes=new TextEncoder().encode(JSON.stringify(value));const digest=await crypto.subtle.digest("SHA-256",bytes);return [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,"0")).join("")}
 
 interface RecoveryContext {
@@ -351,7 +355,7 @@ export function WorkflowEditor() {
       past.current.push(structuredClone(workflow));
       if (past.current.length > 50) past.current.shift();
       future.current = [];
-      setWorkflow(next);
+      setWorkflow(invalidatePermissionApprovals(workflow, next));
     },
     [workflow],
   );
@@ -434,6 +438,17 @@ export function WorkflowEditor() {
         false;
     };
   }, [dirty]);
+  useEffect(() => {
+    (window as Window & { __sandboxWorkflow?: Workflow }).__sandboxWorkflow = workflow;
+    return () => {
+      delete (window as Window & { __sandboxWorkflow?: Workflow }).__sandboxWorkflow;
+    };
+  }, [workflow]);
+  useEffect(() => {
+    const review = () => openPermissionReview();
+    window.addEventListener("sandbox:review-permissions", review);
+    return () => window.removeEventListener("sandbox:review-permissions", review);
+  }, []);
   useEffect(() => {
     const openPicker = () =>
       setPicker({ open: true, position: { x: 360, y: 220 } });
@@ -688,6 +703,57 @@ export function WorkflowEditor() {
     },
     [workflow, commit, confirmNodeDeletion, toast],
   );
+  const unlinkNode = useCallback((id: string) => {
+    const linked = workflow.edges.filter((edge) => edge.sourceNodeId === id || edge.targetNodeId === id);
+    if (!linked.length) {
+      toast.push("This node has no connections to unlink.", "info");
+      return;
+    }
+    const action = actionSerial.current + 1;
+    const next = linked.reduce((current, edge) => disconnectWorkflowEdge(current, edge.id), workflow);
+    commit(next);
+    toast.push(`Unlinked ${linked.length} connection${linked.length === 1 ? "" : "s"}.`, "info", {
+      label: "Undo",
+      onAction: () => {
+        if (actionSerial.current === action) undoRef.current();
+      },
+    });
+  }, [commit, toast, workflow]);
+  const assembleWebBuilder = useCallback((sourceId: string) => {
+    const selected = workflow.nodes.find((node) => node.id === sourceId);
+    if (!selected) return;
+    const sourceBlocks = workflow.nodes.filter((node) =>
+      (node.type === "code" || node.type === "javascript_code") &&
+      node.configuration.executionMode === "source" &&
+      ["html", "javascript", "css"].includes(String(node.configuration.language)),
+    );
+    const nearest = (language: string) => sourceBlocks
+      .filter((node) => node.configuration.language === language)
+      .sort((left, right) => {
+        if (left.id === sourceId) return -1;
+        if (right.id === sourceId) return 1;
+        const distance = (node: WorkflowNode) => Math.hypot(node.position.x - selected.position.x, node.position.y - selected.position.y);
+        return distance(left) - distance(right);
+      })[0];
+    const builder = createNode("web_builder", { x: selected.position.x + 320, y: selected.position.y });
+    builder.name = "Web Builder";
+    let next: Workflow = { ...workflow, nodes: [...workflow.nodes, builder] };
+    const missing: string[] = [];
+    for (const port of WEB_BUILDER_INPUT_PORTS) {
+      const source = nearest(port.language);
+      if (!source) {
+        missing.push(port.label);
+        continue;
+      }
+      next = connectWorkflowNodes(next, { source: source.id, target: builder.id, sourceHandle: "code", targetHandle: port.id }) ?? next;
+    }
+    commit(next);
+    setSelectedNodeId(builder.id);
+    toast.push(missing.length
+      ? `Web Builder created. Add editable ${missing.join(", ")} source blocks to complete it.`
+      : "Web Builder assembled directly from the nearest HTML, JavaScript, and CSS source blocks.",
+    missing.length ? "info" : "success");
+  }, [commit, toast, workflow]);
   const duplicate = useCallback(
     (id: string) => {
       const original = workflow.nodes.find((n) => n.id === id);
@@ -713,7 +779,7 @@ export function WorkflowEditor() {
     const custom:WorkflowNode={id:`custom_function_${crypto.randomUUID().slice(0,8)}`,type:"custom_function",version:1,name:`${source.name} custom`,position:{x:source.position.x+48,y:source.position.y+48},configuration:{},disabled:false,inputBindings:{},customization:{sourceType:source.type,sourceVersion:source.version,sourceName:source.name,sourceContractHash,language:"javascript",sourceCode:`// Return exactly { outputs, branches? }.\nreturn { outputs: ${JSON.stringify(outputObject,null,2)}, branches: {} };\n`,description:definition.description,inputs:structuredClone(definition.inputs),outputs,branches,tests:[],runtimeRequirement:">=20"},errorPolicy:{strategy:"fail",maxRetries:0,retryDelayMs:0,backoff:"fixed",fallbackOutputs:{}}};
     setCustomDraft({node:custom,source:structuredClone(source),initial:JSON.stringify(custom),isNew:true});
   },[toast,workflow.nodes]);
-  useEffect(()=>{const handler=(event:Event)=>{const {action,nodeId}=(event as CustomEvent<{action:string;nodeId:string}>).detail??{};if(!nodeId)return;if(action==="select")setSelectedNodeId(nodeId);else if(action==="customize")void openCustomEditor(nodeId);else if(action==="delete")removeNode(nodeId);else if(action==="enable"||action==="disable")commit({...workflow,nodes:workflow.nodes.map(node=>node.id===nodeId?{...node,disabled:action==="disable"}:node)})};window.addEventListener("sandbox:node-command",handler);return()=>window.removeEventListener("sandbox:node-command",handler)},[commit,openCustomEditor,removeNode,workflow]);
+  useEffect(()=>{const handler=(event:Event)=>{const {action,nodeId}=(event as CustomEvent<{action:string;nodeId:string}>).detail??{};if(!nodeId)return;if(action==="select")setSelectedNodeId(nodeId);else if(action==="customize")void openCustomEditor(nodeId);else if(action==="delete")removeNode(nodeId);else if(action==="unlink")unlinkNode(nodeId);else if(action==="web-builder")assembleWebBuilder(nodeId);else if(action==="enable"||action==="disable")commit({...workflow,nodes:workflow.nodes.map(node=>node.id===nodeId?{...node,disabled:action==="disable"}:node)})};window.addEventListener("sandbox:node-command",handler);return()=>window.removeEventListener("sandbox:node-command",handler)},[assembleWebBuilder,commit,openCustomEditor,removeNode,unlinkNode,workflow]);
   const undo = useCallback(() => {
     const previous = past.current.pop();
     if (previous) {
@@ -1410,6 +1476,8 @@ export function WorkflowEditor() {
                 commit(next);
               }}
               onDelete={() => removeNode(selectedNode.id)}
+              onUnlink={() => unlinkNode(selectedNode.id)}
+              onSendToWebBuilder={(selectedNode.type === "code" || selectedNode.type === "javascript_code") && selectedNode.configuration.executionMode === "source" ? () => assembleWebBuilder(selectedNode.id) : undefined}
               onCustomize={selectedNode.type==="custom_function"||CUSTOMIZABLE_SOURCES.has(selectedNode.type)?()=>void openCustomEditor(selectedNode.id):undefined}
             /></Suspense>
           </>
@@ -1663,6 +1731,57 @@ export function WorkflowEditor() {
   );
 }
 
+function workflowSemanticSignature(workflow: Workflow) {
+  return JSON.stringify({
+    triggerNodeId: workflow.triggerNodeId,
+    nodes: workflow.nodes
+      .filter((node) => node.type !== "note")
+      .map((node) => ({
+        id: node.id,
+        type: node.type,
+        version: node.version,
+        configuration: node.configuration,
+        disabled: node.disabled,
+        inputBindings: node.inputBindings,
+        plugin: node.plugin,
+        customization: node.customization,
+        errorPolicy: node.errorPolicy,
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    edges: workflow.edges
+      .map((edge) => ({
+        id: edge.id,
+        sourceNodeId: edge.sourceNodeId,
+        sourceHandle: edge.sourceHandle,
+        targetNodeId: edge.targetNodeId,
+        targetHandle: edge.targetHandle,
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  });
+}
+
+function invalidatePermissionApprovals(previous: Workflow, next: Workflow): Workflow {
+  if (workflowSemanticSignature(previous) === workflowSemanticSignature(next)) return next;
+  const nodeTypes = new Set(next.nodes.map((node) => node.type));
+  const permissions = { ...next.settings.permissions };
+  if (["run_command", "code", "javascript_code", "python_code"].some((type) => nodeTypes.has(type))) {
+    permissions.commandExecutionPermitted = false;
+    permissions.approvalRevision = null;
+  }
+  if (["gmail_create_draft", "gmail_send_email", "discord_webhook", "discord_embed", "slack_webhook"].some((type) => nodeTypes.has(type))) {
+    permissions.externalCommunicationPermitted = false;
+    permissions.communicationApprovalRevision = null;
+  }
+  if (["gmail_create_draft", "gmail_add_label"].some((type) => nodeTypes.has(type))) {
+    permissions.externalDataWritePermitted = false;
+  }
+  if (["open_browser", "navigate", "click_element", "fill_field", "select_option", "press_key", "wait_for", "extract_data", "screenshot", "download_file", "upload_file", "close_browser"].some((type) => nodeTypes.has(type))) {
+    permissions.browserAutomationPermitted = false;
+    permissions.approvedBrowserProfileIds = [];
+  }
+  return { ...next, settings: { ...next.settings, permissions } };
+}
+
 type WorkflowPermissionKind =
   | "network"
   | "files"
@@ -1685,7 +1804,15 @@ function PermissionReview({
   onApply: (permissions: PermissionSummary) => void;
 }) {
   const [permissions, setPermissions] = useState(workflow.settings.permissions);
+  const [contracts, setContracts] = useState<NodeContract[]>([]);
   const reviewBody = useRef<HTMLElement>(null);
+  useEffect(() => {
+    void api.listNodeContracts().then(setContracts).catch(() => setContracts([]));
+  }, []);
+  const contractByType = useMemo(
+    () => new Map(contracts.map((contract) => [contract.nodeType, contract])),
+    [contracts],
+  );
   const domains = workflow.nodes
     .filter((node) => node.type === "http_request")
     .map((node) => {
@@ -1720,9 +1847,30 @@ function PermissionReview({
     (node) => node.type === "gmail_send_email",
   );
   const externalWriteNodes = workflow.nodes.filter((node) =>
+    ["gmail_create_draft", "gmail_add_label"].includes(node.type) ||
     definitionFor(node.type).externalEffect === "external_write" ||
     definitionFor(node.type).externalEffect === "destructive_or_high_impact"
   );
+  const localPathNodes = workflow.nodes.filter((node) =>
+    ["file_watch_trigger", "move_file", "read_file", "write_file", "copy_path", "delete_path", "list_folder", "download_file", "upload_file"].includes(node.type),
+  );
+  const backgroundRequired = workflow.enabled && workflow.nodes.some((node) =>
+    node.id === workflow.triggerNodeId && ["schedule_trigger", "file_watch_trigger", "gmail_new_email_trigger"].includes(node.type),
+  );
+  const capabilityChecks = [
+    { label: "Network", requested: domains.length > 0, approved: domains.every((domain) => permissions.approvedNetworkDomains.includes(domain)) },
+    { label: "Local files", requested: localPathNodes.length > 0, approved: permissions.approvedFolders.length > 0 },
+    { label: "Browser", requested: browserProfiles.length > 0, approved: permissions.browserAutomationPermitted && browserProfiles.every((id) => permissions.approvedBrowserProfileIds.includes(id)) },
+    { label: "Communication", requested: communicationNodes.length > 0, approved: permissions.externalCommunicationPermitted && (!sendNodes.length || Boolean(permissions.communicationApprovalRevision)) },
+    { label: "External writes", requested: externalWriteNodes.length > 0, approved: Boolean(permissions.externalDataWritePermitted) },
+    { label: "Commands", requested: commandNodes.length > 0, approved: permissions.commandExecutionPermitted && Boolean(permissions.approvalRevision) },
+    { label: "Background", requested: backgroundRequired, approved: permissions.backgroundExecutionPermitted },
+  ].filter((item) => item.requested);
+  const approvedCapabilityCount = capabilityChecks.filter((item) => item.approved).length;
+  const contractImpactNodes = workflow.nodes
+    .map((node) => ({ node, contract: contractByType.get(node.type) }))
+    .filter((item) => item.contract && item.contract.effectLevel !== "pure");
+  const destructiveCount = contractImpactNodes.filter((item) => item.contract?.effectLevel === "destructive").length;
   const collectionRiskNotes=workflow.nodes.flatMap(node=>{
     if(node.type==="loop_over_items")return [`${node.name}: up to ${Number(node.configuration.maxIterations??10000)} batches, ${Number(node.configuration.concurrency??1)} active at once; downstream actions may run once per item.`];
     if(node.type==="switch"&&node.configuration.mode==="all_matches")return [`${node.name}: one item may be copied to several branches.`];
@@ -1812,6 +1960,15 @@ function PermissionReview({
               context={{ workflowId: workflow.id, nodeId: request.nodeId }}
             />
           )}
+          <div className="permission-overview" aria-label="Permission review summary">
+            <div><strong>{capabilityChecks.length}</strong><span>capabilities requested</span></div>
+            <div className={approvedCapabilityCount === capabilityChecks.length ? "ready" : "attention"}><strong>{approvedCapabilityCount}/{capabilityChecks.length}</strong><span>currently approved</span></div>
+            <div className={destructiveCount ? "danger" : "ready"}><strong>{destructiveCount}</strong><span>destructive contracts</span></div>
+          </div>
+          <div className="permission-revision-note">
+            <ShieldCheck size={15} />
+            <span><b>Revision-bound approvals</b> Command, browser, and communication changes automatically revoke their prior approval. Secrets stay in the host credential vault.</span>
+          </div>
           <label>Approved network domains</label>
           {domains.length ? (
             domains.map((domain) => (
@@ -1957,6 +2114,20 @@ function PermissionReview({
             </>
           )}
           {collectionRiskNotes.length>0&&<><label>Collection amplification and state</label>{collectionRiskNotes.map(note=><IssueNotice key={note} issue={{code:"collection_state_review",severity:"warning",message:note,suggestion:"Review runner limits, repeated trusted-path access, ordering, and idempotency before publishing."}} compact context={{workflowId:workflow.id}}/>)}</>}
+          {contractImpactNodes.length > 0 && (
+            <>
+              <label>Authoritative contract impact</label>
+              <div className="permission-contract-list">
+                {contractImpactNodes.map(({ node, contract }) => (
+                  <div key={node.id}>
+                    <span className={`contract-effect contract-effect-${contract!.effectLevel}`}>{contract!.effectLevel}</span>
+                    <b>{node.name}</b>
+                    <small>{contract!.displayName} · retry {contract!.retrySafety.replaceAll("_", " ")}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           {commandNodes.length > 0 && (
             <>
               <label>Command execution</label>

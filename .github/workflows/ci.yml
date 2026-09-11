@@ -67,6 +67,8 @@ jobs:
             src-tauri
             services/hosted-runner
             agents/server
+      - name: Check frontend node contract snapshot
+        run: npm run node-contracts:check
       - name: Test desktop Rust workspace
         env:
           # Unit tests do not package the generated Node/Chromium sidecar. The release

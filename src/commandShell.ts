@@ -1,12 +1,12 @@
 export const COMMAND_PATHS = [
   "help","clear","history",
   ...["workflows","history","plugins","cloud","approvals","settings"].map(value=>`go ${value}`),
-  ...["list","open","create","run","validate","duplicate","enable","disable","archive","import","export"].map(value=>`workflow ${value}`),
-  ...["list","add","select","test","customize","enable","disable","delete"].map(value=>`node ${value}`),
-  ...["list","show","cancel","retry"].map(value=>`run ${value}`),
+  ...["list","open","create","run","validate","diagnose","permissions","revisions","duplicate","enable","disable","archive","import","export"].map(value=>`workflow ${value}`),
+  ...["list","add","select","test","customize","contract","gates","web-builder","unlink","enable","disable","delete"].map(value=>`node ${value}`),
+  ...["list","show","logs","cancel","retry"].map(value=>`run ${value}`),
   ...["status","pause","resume"].map(value=>`runner ${value}`),
   "plugin list","plugin open","connection list","connection test","approval list","approval open",
-  "app launcher","app shortcuts","app settings",
+  "app launcher","app shortcuts","app settings","app version",
 ] as const;
 
 export interface ParsedCommand { path:string; args:string[]; flags:Record<string,string|boolean>; raw:string }
@@ -61,8 +61,8 @@ export function resolveTarget<T extends TargetLike>(query:string,targets:T[]):T{
   const prefixes=targets.filter(item=>item.id.toLowerCase().startsWith(query.toLowerCase()));
   if(prefixes.length===1)return prefixes[0];
   const names=targets.filter(item=>item.name.toLowerCase()===query.toLowerCase());
-  if(names.length===1)return names[0];
   const matches=[...new Map([...prefixes,...names].map(item=>[item.id,item])).values()];
+  if(matches.length===1)return matches[0];
   if(matches.length>1)throw new Error(`Ambiguous target '${query}': ${matches.map(item=>`${item.name} (${item.id})`).join(", ")}`);
   throw new Error(`No target matches '${query}'.`);
 }

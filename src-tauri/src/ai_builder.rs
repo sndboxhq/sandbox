@@ -27,6 +27,10 @@ const SUPPORTED_NODES: &[&str] = &[
     "aggregate",
     "remove_duplicates",
     "set_data",
+    "map_fields",
+    "validate_schema",
+    "text_template",
+    "hash_data",
     "delay",
     "http_request",
     "desktop_notification",
@@ -1140,6 +1144,14 @@ fn apply_configuration_defaults(graph: &mut AiGraph) {
                 json!({"fields":[],"caseSensitive":true,"normalizeWhitespace":false,"keep":"first","scope":"collection","exposeDuplicates":true})
             }
             "set_data" => json!({"values":{"key":"value"}}),
+            "map_fields" => {
+                json!({"mappings":[{"source":"","target":"value","required":false,"default":null}],"preserveUnmapped":false})
+            }
+            "validate_schema" => {
+                json!({"rules":[{"path":"","type":"any","required":true}],"allowAdditionalFields":true})
+            }
+            "text_template" => json!({"template":"Hello {{input.name}}"}),
+            "hash_data" => json!({"encoding":"hex"}),
             "delay" => json!({"amount":1,"unit":"seconds"}),
             "http_request" => {
                 json!({"method":"GET","url":"","query":{},"headers":{},"body":null,"timeoutMs":30000,"retryCount":0})

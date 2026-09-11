@@ -39,6 +39,7 @@ import type {
   WorkflowRevisionSummary,
   WorkflowSummary,
 } from "./types";
+import nodeContractSnapshot from "./generated/node-contracts.json";
 import { previewApi } from "./previewApi";
 const tauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 export const api = {
@@ -156,7 +157,7 @@ export const api = {
     tauri
       ? invoke<ValidationIssue[]>("validate_workflow", { workflow })
       : previewApi.validateWorkflow(workflow),
-  listNodeContracts: () => tauri ? invoke<NodeContract[]>("list_node_contracts") : Promise.resolve([]),
+  listNodeContracts: () => tauri ? invoke<NodeContract[]>("list_node_contracts") : Promise.resolve(nodeContractSnapshot as unknown as NodeContract[]),
   evaluateNodeGates: (workflow: Workflow, placement = "local") => tauri ? invoke<Record<string,NodeGate>>("evaluate_node_gates", { workflow, placement }) : Promise.resolve({}),
   testCustomNode: (workflow: Workflow, nodeId: string) => tauri ? invoke<CustomNodeTestReport>("test_custom_node", { workflow, nodeId }) : Promise.reject(new Error("Custom node verification requires the desktop runtime.")),
   getCustomNodeVerification: (workflowId:string,nodeId:string) => tauri ? invoke<CustomNodeVerification|undefined>("get_custom_node_verification",{workflowId,nodeId}) : Promise.resolve(undefined),
