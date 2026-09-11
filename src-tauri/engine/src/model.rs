@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 6;
+pub const CURRENT_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -87,6 +87,129 @@ pub struct Position {
     pub y: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ValueType {
+    Any,
+    String,
+    Number,
+    Boolean,
+    Object,
+    Array,
+    Path,
+    Connection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomPortDefinition {
+    pub key: String,
+    pub label: String,
+    pub value_type: ValueType,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomNodeTest {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub inputs: Value,
+    #[serde(default)]
+    pub items: Vec<Value>,
+    #[serde(default)]
+    pub expected_outputs: Value,
+    #[serde(default)]
+    pub expected_branches: Value,
+    #[serde(default)]
+    pub expected_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeCustomization {
+    pub source_type: String,
+    pub source_version: u32,
+    pub source_name: String,
+    pub source_contract_hash: String,
+    pub language: String,
+    pub source_code: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub inputs: Vec<CustomPortDefinition>,
+    #[serde(default)]
+    pub outputs: Vec<CustomPortDefinition>,
+    #[serde(default)]
+    pub branches: Vec<CustomPortDefinition>,
+    #[serde(default)]
+    pub tests: Vec<CustomNodeTest>,
+    #[serde(default = "default_custom_runtime_requirement")]
+    pub runtime_requirement: String,
+}
+
+fn default_custom_runtime_requirement() -> String {
+    ">=20".into()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorStrategy {
+    Fail,
+    Route,
+    Fallback,
+}
+
+impl Default for ErrorStrategy {
+    fn default() -> Self { Self::Fail }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryBackoff {
+    Fixed,
+    Exponential,
+}
+
+impl Default for RetryBackoff {
+    fn default() -> Self { Self::Fixed }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeErrorPolicy {
+    #[serde(default)]
+    pub strategy: ErrorStrategy,
+    #[serde(default)]
+    pub max_retries: u8,
+    #[serde(default)]
+    pub retry_delay_ms: u64,
+    #[serde(default)]
+    pub backoff: RetryBackoff,
+    #[serde(default)]
+    pub fallback_outputs: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomNodeVerification {
+    pub workflow_id: String,
+    pub node_id: String,
+    pub fingerprint: String,
+    pub passed_at: DateTime<Utc>,
+    pub output_coverage: Vec<String>,
+    pub branch_coverage: Vec<String>,
+    pub runtime_version: String,
+}
+
+impl Default for NodeErrorPolicy {
+    fn default() -> Self {
+        Self { strategy: ErrorStrategy::Fail, max_retries: 0, retry_delay_ms: 0, backoff: RetryBackoff::Fixed, fallback_outputs: Value::Object(Default::default()) }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowNode {
@@ -109,6 +232,10 @@ pub struct WorkflowNode {
     /// field absent and therefore require no migration choice from the user.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginNodePin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub customization: Option<NodeCustomization>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_policy: Option<NodeErrorPolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -378,6 +505,7 @@ pub enum ExecutionStatus {
     Queued,
     Running,
     Successful,
+    SuccessfulWithWarnings,
     Failed,
     Skipped,
     Cancelled,
@@ -390,6 +518,7 @@ pub enum NodeStatus {
     Waiting,
     Running,
     Successful,
+    Handled,
     Failed,
     Skipped,
     Cancelled,

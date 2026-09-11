@@ -372,6 +372,8 @@ mod tests {
                 disabled: false,
                 input_bindings: Default::default(),
                 plugin: None,
+                customization: None,
+                error_policy: None,
             }],
             edges: vec![],
             settings: WorkflowSettings {

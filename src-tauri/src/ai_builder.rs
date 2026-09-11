@@ -1023,6 +1023,8 @@ fn graph_to_proposal(graph: AiGraph, current: Workflow) -> Result<AiWorkflowProp
                 disabled: node.disabled,
                 input_bindings,
                 plugin: None,
+                customization: None,
+                error_policy: None,
             })
         })
         .collect::<Result<Vec<_>>>()?;

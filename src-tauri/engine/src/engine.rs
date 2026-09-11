@@ -6,9 +6,10 @@ use crate::{
     redaction::{bounded_log, redact_value},
     references::resolve_value,
     validation::{topological_order, validate, ValidationSeverity},
-    CollectionEvidence, DataLineage, Database, EngineError, ExecutionError, ExecutionRecord,
-    ExecutionStatus, InputBinding, NodeExecution, NodeStatus, PendingApproval, RuntimeMetadata,
-    Workflow, WorkflowItem, WorkflowNode,
+    contract_for, custom_node_fingerprint, CollectionEvidence, DataLineage, Database, EffectLevel, EngineError, ErrorStrategy,
+    ExecutionError, ExecutionRecord, ExecutionStatus, InputBinding, NodeExecution, NodeStatus,
+    PendingApproval, RetryBackoff, RetrySafety, RuntimeMetadata, ValueType, Workflow, WorkflowItem,
+    WorkflowNode,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -189,6 +190,17 @@ impl Engine {
                     .join(" "),
             ));
         }
+        for node in workflow.nodes.iter().filter(|node| node.node_type == "custom_function" && !node.disabled) {
+            let customization = node.customization.as_ref().ok_or_else(|| EngineError::Validation(format!("{} has no custom contract.", node.name)))?;
+            let fingerprint = custom_node_fingerprint(customization);
+            let verified = self.db.custom_node_verification(&workflow.id, &node.id)?
+                .is_some_and(|receipt| receipt.fingerprint == fingerprint
+                    && customization.outputs.iter().filter(|port| port.required).all(|port| receipt.output_coverage.contains(&port.key))
+                    && customization.branches.iter().all(|port| receipt.branch_coverage.contains(&port.key)));
+            if !verified {
+                return Err(EngineError::Validation(format!("{} is an unverified ƒx node. Run and save all fixtures after the latest code or contract change.", node.name)));
+            }
+        }
         let order = topological_order(workflow)?;
         let started = Utc::now();
         let mut record = ExecutionRecord {
@@ -364,7 +376,7 @@ impl Engine {
                     .node_executions
                     .iter()
                     .find(|execution| execution.node_id == edge.source_node_id)
-                    .filter(|execution| !matches!(execution.status, NodeStatus::Successful))
+                    .filter(|execution| !matches!(execution.status, NodeStatus::Successful | NodeStatus::Handled))
                     .map(|execution| (edge.source_node_id.as_str(), execution.status))
             });
             if let Some((dependency, status)) = failed_dependency {
@@ -456,10 +468,33 @@ impl Engine {
                     .unwrap_or(workflow.settings.default_node_timeout_ms)
                     .clamp(100, 600_000)
             };
-            let execution = tokio::select! {
-                _ = cancellation.cancelled() => Err(EngineError::Cancelled),
-                result = tokio::time::timeout(Duration::from_millis(timeout_ms), self.execute_node(node, workflow, &record.id, &trigger, &outputs, &pending_state, cancellation.clone())) => {
-                    match result { Ok(value) => value, Err(_) => Err(EngineError::Node(format!("{} exceeded its {}-second timeout.", node.name, timeout_ms as f64 / 1000.0))) }
+            let policy = node.error_policy.clone().unwrap_or_default();
+            let retry_allowed = contract_for(&node.node_type).is_some_and(|contract| {
+                contract.effect_level != EffectLevel::Destructive && contract.retry_safety == RetrySafety::Safe
+            });
+            let mut retries_performed = 0u32;
+            let execution = loop {
+                let attempt = tokio::select! {
+                    _ = cancellation.cancelled() => Err(EngineError::Cancelled),
+                    result = tokio::time::timeout(Duration::from_millis(timeout_ms), self.execute_node(node, workflow, &record.id, &trigger, &outputs, &pending_state, cancellation.clone())) => {
+                        match result { Ok(value) => value, Err(_) => Err(EngineError::Node(format!("{} exceeded its {}-second timeout.", node.name, timeout_ms as f64 / 1000.0))) }
+                    }
+                };
+                match attempt {
+                    Ok(mut result) => { result.retry_count = result.retry_count.saturating_add(retries_performed); break Ok(result); }
+                    Err(error) if !matches!(error, EngineError::Cancelled) && retry_allowed && retries_performed < policy.max_retries as u32 => {
+                        retries_performed += 1;
+                        record.node_executions[idx].retry_count = retries_performed;
+                        record.node_executions[idx].logs.push(format!("Attempt {} failed; retry {} of {} scheduled.", retries_performed, retries_performed, policy.max_retries));
+                        self.publish(&record)?;
+                        let multiplier = if policy.backoff == RetryBackoff::Exponential { 1u64.checked_shl(retries_performed.saturating_sub(1)).unwrap_or(u64::MAX) } else { 1 };
+                        let delay_ms = policy.retry_delay_ms.saturating_mul(multiplier).min(120_000);
+                        tokio::select! {
+                            _ = cancellation.cancelled() => break Err(EngineError::Cancelled),
+                            _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => {}
+                        }
+                    }
+                    Err(error) => break Err(error),
                 }
             };
             let (execution, loop_summaries) = match execution {
@@ -567,16 +602,40 @@ impl Engine {
                     outputs.insert(node.id.clone(), result.output);
                 }
                 Err(error) => {
-                    node_record.status = if matches!(error, EngineError::Cancelled) {
-                        NodeStatus::Cancelled
-                    } else {
-                        NodeStatus::Failed
-                    };
-                    node_record.error = Some(error.execution_error());
+                    let execution_error = error.execution_error();
+                    node_record.error = Some(execution_error.clone());
+                    node_record.retry_count = retries_performed;
                     if let EngineError::Browser { diagnostics, .. } = &error {
                         node_record.browser_diagnostics = diagnostics.clone();
                     }
                     node_record.logs.push(bounded_log(error.to_string()));
+                    if matches!(error, EngineError::Cancelled) {
+                        node_record.status = NodeStatus::Cancelled;
+                    } else {
+                        match policy.strategy {
+                            ErrorStrategy::Fail => node_record.status = NodeStatus::Failed,
+                            ErrorStrategy::Route => {
+                                node_record.status = NodeStatus::Handled;
+                                let envelope = json!({"error":{"code":execution_error.code,"message":execution_error.message,"detail":execution_error.detail,"suggestion":execution_error.suggestion,"nodeId":node.id,"nodeType":node.node_type,"attempts":retries_performed + 1}});
+                                node_record.output = redact_value(&envelope);
+                                node_record.output_items = vec![WorkflowItem::json(envelope.clone())];
+                                node_record.branch_followed = Some("error".into());
+                                for edge in workflow.edges.iter().filter(|edge| edge.source_node_id == node.id) {
+                                    active_edges.insert(edge.id.clone(), edge.source_handle == "error");
+                                }
+                                outputs.insert(node.id.clone(), envelope);
+                                node_record.logs.push("Failure routed through the reserved error branch.".into());
+                            }
+                            ErrorStrategy::Fallback => {
+                                node_record.status = NodeStatus::Handled;
+                                let fallback = policy.fallback_outputs.clone();
+                                node_record.output = redact_value(&fallback);
+                                node_record.output_items = vec![WorkflowItem::json(fallback.clone())];
+                                outputs.insert(node.id.clone(), fallback);
+                                node_record.logs.push("Failure recovered with validated fallback outputs.".into());
+                            }
+                        }
+                    }
                 }
             }
             if let Some(diagnostics) = node_record.browser_diagnostics.clone() {
@@ -631,6 +690,12 @@ impl Engine {
             .any(|n| n.status == NodeStatus::Failed)
         {
             ExecutionStatus::Failed
+        } else if record
+            .node_executions
+            .iter()
+            .any(|n| n.status == NodeStatus::Handled)
+        {
+            ExecutionStatus::SuccessfulWithWarnings
         } else {
             ExecutionStatus::Successful
         };
@@ -638,7 +703,7 @@ impl Engine {
             .node_executions
             .iter()
             .find_map(|node| node.error.clone());
-        if record.status == ExecutionStatus::Successful && !pending_state.is_empty() {
+        if matches!(record.status, ExecutionStatus::Successful | ExecutionStatus::SuccessfulWithWarnings) && !pending_state.is_empty() {
             self.db.set_workflow_states(&workflow.id, &pending_state)?;
         }
         self.publish(&record)?;
@@ -1164,6 +1229,21 @@ impl Engine {
         };
         resolved_node.configuration =
             resolve_configuration_expressions(&resolved_node.configuration, &context)?;
+        if resolved_node.node_type == "custom_function" {
+            let customization = resolved_node.customization.as_ref().ok_or_else(|| EngineError::Validation("Custom function contract is missing.".into()))?;
+            let custom_configuration = resolved_node.configuration.clone();
+            resolved_node.configuration = json!({
+                "language": customization.language,
+                "sourceCode": customization.source_code,
+                "executionMode": "run",
+                "itemMode": "all_items",
+                "runtimeVersion": customization.runtime_requirement,
+                "helperLanguageVersion": EXPRESSION_LANGUAGE_VERSION,
+                "dependencies": [],
+                "timeoutMs": 30_000,
+                "customConfiguration": custom_configuration
+            });
+        }
         if resolved_node.node_type == "merge" {
             let mut successful = workflow
                 .edges
@@ -1292,8 +1372,8 @@ impl Engine {
             }
             "run_command" => execute_command(node, workflow, trigger, outputs, cancellation).await,
             "ai_prompt" => self.execute_ai_prompt(node, cancellation).await,
-            "code" | "javascript_code" | "python_code" => {
-                execute_code(
+            "code" | "javascript_code" | "python_code" | "custom_function" => {
+                let result = execute_code(
                     node,
                     workflow,
                     execution_id,
@@ -1303,7 +1383,8 @@ impl Engine {
                     outputs,
                     cancellation,
                 )
-                .await
+                .await?;
+                if node.node_type == "custom_function" { normalize_custom_function_result(node, result) } else { Ok(result) }
             }
             "web_builder" => {
                 self.execute_web_builder(node, workflow, trigger, outputs)
@@ -2931,9 +3012,9 @@ async fn execute_code(
         }))
         .log(format!("Provided {} source to downstream nodes.", language)));
     }
-    if !workflow.settings.permissions.command_execution_permitted
+    if node.node_type != "custom_function" && (!workflow.settings.permissions.command_execution_permitted
         || workflow.settings.permissions.approval_revision.is_none()
-    {
+    ) {
         return Err(EngineError::Permission(
             "Executing a Code node requires command execution approval.".into(),
         ));
@@ -3001,6 +3082,7 @@ async fn execute_code(
         "trigger": trigger,
         "workflow": {"id":workflow.id,"name":workflow.name,"schemaVersion":workflow.schema_version},
         "execution": {"id":execution_id,"attempt":1},
+        "configuration": node.configuration.get("customConfiguration").cloned().unwrap_or_else(|| json!({})),
         "mode": execution_mode,
     });
     let mut command = Command::new(executable);
@@ -3123,6 +3205,54 @@ async fn execute_code(
         .with_capability("code.execute"))
 }
 
+fn normalize_custom_function_result(node: &WorkflowNode, mut result: NodeResult) -> Result<NodeResult, EngineError> {
+    let customization = node.customization.as_ref().ok_or_else(|| EngineError::Validation("Custom function contract is missing.".into()))?;
+    let returned = result.output.pointer("/result/0/data").cloned().unwrap_or(Value::Null);
+    let object = returned.as_object().ok_or_else(|| EngineError::Node("Custom functions must return { outputs, branches? }.".into()))?;
+    let outputs = object.get("outputs").and_then(Value::as_object).ok_or_else(|| EngineError::Node("Custom functions must return an outputs object.".into()))?;
+    for port in &customization.outputs {
+        let value = outputs.get(&port.key);
+        if port.required && value.is_none() {
+            return Err(EngineError::Node(format!("Custom function did not return required output '{}'.", port.key)));
+        }
+        if let Some(value) = value {
+            let valid = match port.value_type {
+                ValueType::Any => true,
+                ValueType::String | ValueType::Path | ValueType::Connection => value.is_string(),
+                ValueType::Number => value.is_number(), ValueType::Boolean => value.is_boolean(),
+                ValueType::Object => value.is_object(), ValueType::Array => value.is_array(),
+            };
+            if !valid { return Err(EngineError::Node(format!("Custom output '{}' does not match its declared {:?} type.", port.key, port.value_type))); }
+        }
+    }
+    if outputs.keys().any(|key| !customization.outputs.iter().any(|port| &port.key == key)) {
+        return Err(EngineError::Node("Custom function returned an undeclared output.".into()));
+    }
+    let declared_branches = customization.branches.iter().map(|port| port.key.as_str()).collect::<HashSet<_>>();
+    let branches = object.get("branches").and_then(Value::as_object).cloned().unwrap_or_default();
+    if branches.keys().any(|key| !declared_branches.contains(key.as_str())) {
+        return Err(EngineError::Node("Custom function returned an undeclared branch.".into()));
+    }
+    result.branch_outputs = branches.into_iter().map(|(key, value)| {
+        let values = value.as_array().cloned().unwrap_or_else(|| vec![value]);
+        (key.clone(), values.into_iter().enumerate().map(|(index, value)| {
+            let mut item = WorkflowItem::json(value);
+            item.source_node_id = Some(node.id.clone()); item.source_item_index = Some(index); item.branch = Some(key.clone()); item
+        }).collect())
+    }).collect();
+    result.collection = Some(CollectionEvidence {
+        input_item_count: 0,
+        output_item_count: 1,
+        branch_counts: result.branch_outputs.iter().map(|(key, items)| (key.clone(), items.len())).collect(),
+        ordering_policy: "declared_custom_branch_order".into(),
+        ..Default::default()
+    });
+    result.output = Value::Object(outputs.clone());
+    result.output_items = vec![WorkflowItem::json(result.output.clone())];
+    result.logs.push("Validated custom ƒx outputs and branch correspondence.".into());
+    Ok(result)
+}
+
 const JAVASCRIPT_CODE_WRAPPER: &str = r#"'use strict';
 const nativeProcess = process;
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
@@ -3135,7 +3265,7 @@ nativeProcess.stdin.on('end', async () => {
   const helpers=Object.freeze({json:Object.freeze({parse:JSON.parse,stringify:JSON.stringify}),string:Object.freeze({trim:v=>String(v).trim(),lower:v=>String(v).toLowerCase(),upper:v=>String(v).toUpperCase()}),number:v=>{const n=Number(v);if(!Number.isFinite(n))throw new TypeError('number() conversion failed');return n;},boolean:v=>v===true||v==='true'||(typeof v==='number'&&v!==0),array:Object.freeze({first:v=>v?.[0]??null,last:v=>v?.[v.length-1]??null,length:v=>Array.isArray(v)?v.length:0}),object:Object.freeze({keys:Object.keys,values:Object.values}),date:Object.freeze({iso:v=>new Date(v).toISOString()})});
   let seed=2166136261; Math.random=()=>((seed=Math.imul(seed^seed>>>15,1|seed))>>>0)/4294967296; const NativeDate=Date,fixed=NativeDate.now(); globalThis.Date=class extends NativeDate{constructor(...args){super(...(args.length?args:[fixed]));}static now(){return fixed;}};
   try { delete globalThis.process; delete globalThis.fetch; } catch {}
-  const run=async (input,items)=>{ const fn=new AsyncFunction('ctx','input','items','nodes','trigger','workflow','execution','helpers','console','require','process','fetch','"use strict";\n'+payload.source); return await fn(Object.freeze({input,items,nodes:payload.nodes,trigger:payload.trigger,workflow:payload.workflow,execution:payload.execution,helpers,log:safeConsole.log}),input,items,payload.nodes,payload.trigger,payload.workflow,payload.execution,helpers,safeConsole,undefined,undefined,undefined); };
+  const run=async (input,items)=>{ const fn=new AsyncFunction('ctx','input','items','nodes','trigger','workflow','execution','helpers','console','require','process','fetch','"use strict";\n'+payload.source); return await fn(Object.freeze({input,inputs:payload.configuration.fixtureInputs??input,items,configuration:payload.configuration,upstream:payload.nodes,nodes:payload.nodes,trigger:payload.trigger,workflow:payload.workflow,execution:payload.execution,helpers,log:safeConsole.log}),input,items,payload.nodes,payload.trigger,payload.workflow,payload.execution,helpers,safeConsole,undefined,undefined,undefined); };
   try { let value;if(payload.mode==='each_item'){value=[];for(const item of payload.items)value.push(await run(item.data,[item]));}else value=await run(payload.input,payload.items); if(value===undefined)value=null; const items=Array.isArray(value)?value:(value&&Array.isArray(value.items)?value.items:[value]); nativeProcess.stdout.write(JSON.stringify({result:items.map((v,i)=>v&&Object.prototype.hasOwnProperty.call(v,'data')?v:{data:v,sourceItemIndex:i}),logs})); } catch(error){ nativeProcess.stderr.write(String(error?.stack||error)); nativeProcess.exitCode=1; }
 });"#;
 
@@ -3163,7 +3293,7 @@ def audit(event,args):
 sys.addaudithook(audit)
 helpers={'string':{'trim':lambda v:str(v).strip(),'lower':lambda v:str(v).lower(),'upper':lambda v:str(v).upper()},'array':{'first':lambda v:v[0] if v else None,'last':lambda v:v[-1] if v else None}}
 def run(inp,items):
- scope={'ctx':{'input':inp,'items':items,'nodes':payload['nodes'],'trigger':payload['trigger'],'workflow':payload['workflow'],'execution':payload['execution'],'helpers':helpers},'input':inp,'items':items,'nodes':payload['nodes'],'trigger':payload['trigger'],'workflow':payload['workflow'],'execution':payload['execution'],'helpers':helpers,'result':None,'print':lambda *v,**k:record_log(' '.join(map(str,v)))}
+ scope={'ctx':{'input':inp,'inputs':payload['configuration'].get('fixtureInputs',inp),'items':items,'configuration':payload['configuration'],'upstream':payload['nodes'],'nodes':payload['nodes'],'trigger':payload['trigger'],'workflow':payload['workflow'],'execution':payload['execution'],'helpers':helpers,'log':record_log},'input':inp,'items':items,'nodes':payload['nodes'],'trigger':payload['trigger'],'workflow':payload['workflow'],'execution':payload['execution'],'helpers':helpers,'result':None,'print':lambda *v,**k:record_log(' '.join(map(str,v)))}
  exec(compile(payload['source'],'user_code.py','exec'),{'__builtins__':dict(vars(builtins),open=None,exec=None,eval=None,compile=None,input=None)},scope)
  if callable(scope.get('main')): return scope['main'](scope['ctx'])
  return scope.get('result')
@@ -4160,6 +4290,8 @@ mod tests {
             disabled: false,
             input_bindings: Default::default(),
             plugin: None,
+            customization: None,
+            error_policy: None,
         }
     }
     fn edge(id: &str, s: &str, handle: &str, t: &str) -> WorkflowEdge {

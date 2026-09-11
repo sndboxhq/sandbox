@@ -1,5 +1,5 @@
 use crate::{
-    BrowserDiagnostics, BrowserProfile, ConnectionMetadata, ConnectionStatus, EngineError,
+    BrowserDiagnostics, BrowserProfile, ConnectionMetadata, ConnectionStatus, CustomNodeVerification, EngineError,
     ExecutionError, ExecutionRecord, ExecutionStatus, InstalledPlugin, PendingApproval,
     PluginInstallState, PluginRevocation, RecordedWorkflowDraft, Workflow, WorkflowMetadata,
     WorkflowMetadataPatch, WorkflowRevisionSummary, WorkflowSummary,
@@ -127,6 +127,11 @@ impl Database {
                 .execute_batch(include_str!("../migrations/013_collection_checkpoints.sql"))
                 .map_err(storage)?;
         }
+        if version < 14 {
+            connection
+                .execute_batch(include_str!("../migrations/014_custom_node_verification.sql"))
+                .map_err(storage)?;
+        }
         migrate_saved_workflows(&connection)?;
         backfill_workflow_revisions(&connection)?;
         Ok(())
@@ -138,6 +143,34 @@ impl Database {
             .map_err(|_| EngineError::Storage("Database lock was poisoned.".into()))?
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(storage)
+    }
+
+    pub fn save_custom_node_verification(&self, verification: &CustomNodeVerification) -> Result<(), EngineError> {
+        self.connection.lock().map_err(|_| EngineError::Storage("Database lock was poisoned.".into()))?.execute(
+            "INSERT INTO custom_node_verifications(workflow_id,node_id,fingerprint,runtime_version,output_coverage_json,branch_coverage_json,passed_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workflow_id,node_id) DO UPDATE SET fingerprint=excluded.fingerprint,runtime_version=excluded.runtime_version,output_coverage_json=excluded.output_coverage_json,branch_coverage_json=excluded.branch_coverage_json,passed_at=excluded.passed_at",
+            params![verification.workflow_id,verification.node_id,verification.fingerprint,verification.runtime_version,serde_json::to_string(&verification.output_coverage).map_err(storage)?,serde_json::to_string(&verification.branch_coverage).map_err(storage)?,verification.passed_at.to_rfc3339()]
+        ).map_err(storage)?;
+        Ok(())
+    }
+
+    pub fn custom_node_verification(&self, workflow_id: &str, node_id: &str) -> Result<Option<CustomNodeVerification>, EngineError> {
+        self.connection.lock().map_err(|_| EngineError::Storage("Database lock was poisoned.".into()))?.query_row(
+            "SELECT fingerprint,runtime_version,output_coverage_json,branch_coverage_json,passed_at FROM custom_node_verifications WHERE workflow_id=? AND node_id=?",
+            params![workflow_id,node_id],
+            |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?))
+        ).optional().map_err(storage)?.map(|(fingerprint,runtime_version,outputs,branches,passed_at)| Ok(CustomNodeVerification {
+            workflow_id: workflow_id.into(), node_id: node_id.into(), fingerprint, runtime_version,
+            output_coverage: serde_json::from_str(&outputs).map_err(storage)?,
+            branch_coverage: serde_json::from_str(&branches).map_err(storage)?,
+            passed_at: parse_time(&passed_at),
+        })).transpose()
+    }
+
+    pub fn clear_custom_node_verification(&self, workflow_id: &str, node_id: &str) -> Result<(), EngineError> {
+        self.connection.lock().map_err(|_| EngineError::Storage("Database lock was poisoned.".into()))?.execute(
+            "DELETE FROM custom_node_verifications WHERE workflow_id=? AND node_id=?", params![workflow_id,node_id]
+        ).map_err(storage)?;
+        Ok(())
     }
 
     pub fn save_loop_iteration_checkpoint(
@@ -1848,6 +1881,7 @@ fn status_str(status: ExecutionStatus) -> &'static str {
         ExecutionStatus::Queued => "queued",
         ExecutionStatus::Running => "running",
         ExecutionStatus::Successful => "successful",
+        ExecutionStatus::SuccessfulWithWarnings => "successful_with_warnings",
         ExecutionStatus::Failed => "failed",
         ExecutionStatus::Skipped => "skipped",
         ExecutionStatus::Cancelled => "cancelled",
@@ -1858,6 +1892,7 @@ fn parse_status(value: &str) -> ExecutionStatus {
         "queued" => ExecutionStatus::Queued,
         "running" => ExecutionStatus::Running,
         "successful" => ExecutionStatus::Successful,
+        "successful_with_warnings" => ExecutionStatus::SuccessfulWithWarnings,
         "skipped" => ExecutionStatus::Skipped,
         "cancelled" => ExecutionStatus::Cancelled,
         _ => ExecutionStatus::Failed,
@@ -1979,7 +2014,7 @@ fn parse_connection(row: &rusqlite::Row) -> rusqlite::Result<ConnectionMetadata>
 fn migrate_workflow(mut workflow: Workflow) -> Result<Workflow, EngineError> {
     match workflow.schema_version {
         crate::model::CURRENT_SCHEMA_VERSION => Ok(workflow),
-        1 | 2 | 3 | 4 | 5 => {
+        1 | 2 | 3 | 4 | 5 | 6 => {
             workflow.schema_version = crate::model::CURRENT_SCHEMA_VERSION;
             Ok(workflow)
         }
@@ -2238,6 +2273,8 @@ mod tests {
                 disabled: false,
                 input_bindings: Default::default(),
                 plugin: None,
+                customization: None,
+                error_policy: None,
             }],
             edges: vec![],
             settings: WorkflowSettings::default(),

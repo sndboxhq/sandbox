@@ -7,6 +7,8 @@ use crate::{
 use chrono::{DateTime, Utc};
 use reqwest::Method;
 use sandbox_engine::{
+    custom_node_fingerprint, gate_node, node_contracts, CustomNodeVerification,
+    NodeContract, NodeGate,
     validation::{validate, ValidationIssue},
     BrowserProfile, BrowserProfileSettings, ConnectionMetadata, ConnectionStatus, ExecutionRecord,
     InstalledPlugin, PendingApproval, PermissionSummary, StructuredLocator, Workflow,
@@ -1034,6 +1036,102 @@ pub async fn import_workflow(
 #[tauri::command]
 pub fn validate_workflow(workflow: Workflow) -> Vec<ValidationIssue> {
     validate(&workflow)
+}
+
+#[tauri::command]
+pub fn list_node_contracts() -> Vec<NodeContract> {
+    node_contracts()
+}
+
+#[tauri::command]
+pub fn evaluate_node_gates(workflow: Workflow, placement: Option<String>) -> std::collections::BTreeMap<String, NodeGate> {
+    let placement = placement.unwrap_or_else(|| "local".into());
+    workflow.nodes.iter().map(|node| (node.id.clone(), gate_node(node, &placement))).collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomFixtureResult {
+    id: String,
+    name: String,
+    passed: bool,
+    duration_ms: u64,
+    logs: Vec<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomNodeTestReport {
+    passed: bool,
+    fingerprint: String,
+    output_coverage: Vec<String>,
+    branch_coverage: Vec<String>,
+    fixtures: Vec<CustomFixtureResult>,
+    verification: Option<CustomNodeVerification>,
+}
+
+#[tauri::command]
+pub async fn test_custom_node(
+    workflow: Workflow,
+    node_id: String,
+    state: State<'_, AppState>,
+) -> Result<CustomNodeTestReport> {
+    if state.engine.database().get_workflow(&workflow.id).map_err(err)?.is_none() {
+        return Err("Save the workflow before verifying its custom node.".into());
+    }
+    let node = workflow.nodes.iter().find(|node| node.id == node_id).cloned().ok_or_else(|| "Custom node no longer exists.".to_string())?;
+    if node.node_type != "custom_function" { return Err("Only custom ƒx nodes use the custom verification suite.".into()); }
+    let customization = node.customization.clone().ok_or_else(|| "Custom contract is missing.".to_string())?;
+    let fingerprint = custom_node_fingerprint(&customization);
+    let mut fixture_results = Vec::new();
+    let mut output_coverage = std::collections::BTreeSet::new();
+    let mut branch_coverage = std::collections::BTreeSet::new();
+    for fixture in &customization.tests {
+        let execution = state.engine.test_node(
+            workflow.clone(), &node_id,
+            json!({"input":{"items":fixture.items},"fixtureInputs":fixture.inputs}),
+            None, false, CancellationToken::new()
+        ).await;
+        let (passed, duration_ms, logs, actual_error) = match execution {
+            Ok(record) => {
+                let node_run = record.node_executions.first();
+                let error_text = node_run.and_then(|run| run.error.as_ref()).map(|error| format!("{}: {}", error.code, error.message));
+                let expected_error_ok = match &fixture.expected_error { Some(expected) => error_text.as_ref().is_some_and(|actual| actual.contains(expected)), None => error_text.is_none() };
+                let actual_output = node_run.map(|run| &run.output).unwrap_or(&Value::Null);
+                let expected_output_ok = fixture.expected_outputs.as_object().is_some_and(|expected| expected.iter().all(|(key, value)| actual_output.get(key) == Some(value)));
+                let branch_counts = node_run.and_then(|run| run.collection.as_ref()).map(|collection| &collection.branch_counts);
+                let expected_branch_ok = fixture.expected_branches.as_object().is_some_and(|expected| expected.keys().all(|key| branch_counts.is_some_and(|counts| counts.get(key).copied().unwrap_or(0) > 0)));
+                if expected_error_ok && expected_output_ok && expected_branch_ok {
+                    if let Some(expected) = fixture.expected_outputs.as_object() { output_coverage.extend(expected.keys().cloned()); }
+                    if let Some(expected) = fixture.expected_branches.as_object() { branch_coverage.extend(expected.keys().cloned()); }
+                }
+                (expected_error_ok && expected_output_ok && expected_branch_ok, record.duration_ms.unwrap_or(0), node_run.map(|run| run.logs.clone()).unwrap_or_default(), error_text)
+            }
+            Err(error) => {
+                let matches = fixture.expected_error.as_ref().is_some_and(|expected| error.to_string().contains(expected));
+                (matches, 0, vec![], Some(error.to_string()))
+            }
+        };
+        fixture_results.push(CustomFixtureResult { id: fixture.id.clone(), name: fixture.name.clone(), passed, duration_ms, logs, error: actual_error });
+    }
+    let coverage_complete = customization.outputs.iter().filter(|port| port.required).all(|port| output_coverage.contains(&port.key))
+        && customization.branches.iter().all(|port| branch_coverage.contains(&port.key));
+    let passed = !fixture_results.is_empty() && fixture_results.iter().all(|fixture| fixture.passed) && coverage_complete;
+    let verification = if passed {
+        let receipt = CustomNodeVerification { workflow_id: workflow.id.clone(), node_id: node_id.clone(), fingerprint: fingerprint.clone(), passed_at: Utc::now(), output_coverage: output_coverage.iter().cloned().collect(), branch_coverage: branch_coverage.iter().cloned().collect(), runtime_version: customization.runtime_requirement.clone() };
+        state.engine.database().save_custom_node_verification(&receipt).map_err(err)?;
+        Some(receipt)
+    } else {
+        state.engine.database().clear_custom_node_verification(&workflow.id, &node_id).map_err(err)?;
+        None
+    };
+    Ok(CustomNodeTestReport { passed, fingerprint, output_coverage: output_coverage.into_iter().collect(), branch_coverage: branch_coverage.into_iter().collect(), fixtures: fixture_results, verification })
+}
+
+#[tauri::command]
+pub fn get_custom_node_verification(workflow_id: String, node_id: String, state: State<'_, AppState>) -> Result<Option<CustomNodeVerification>> {
+    state.engine.database().custom_node_verification(&workflow_id, &node_id).map_err(err)
 }
 
 #[tauri::command]

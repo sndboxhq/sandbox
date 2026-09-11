@@ -783,6 +783,8 @@ mod tests {
                     input: serde_json::json!({}),
                     credential_references: BTreeMap::new(),
                 }),
+                customization: None,
+                error_policy: None,
             }],
             edges: vec![],
             settings: WorkflowSettings::default(),

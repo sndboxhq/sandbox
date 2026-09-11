@@ -1,4 +1,4 @@
-use crate::{expressions::inspect_template, EngineError, InputBinding, Workflow};
+use crate::{contract_for, expressions::inspect_template, value_types_compatible, EffectLevel, EngineError, ErrorStrategy, InputBinding, RetrySafety, ValueType, Workflow, WorkflowNode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -221,6 +221,7 @@ pub fn validate(workflow: &Workflow) -> Vec<ValidationIssue> {
                 }
             }
         }
+        validate_typed_edge(workflow, edge, &mut issues);
     }
     if topological_order(workflow).is_err() {
         issues.push(issue(
@@ -265,6 +266,8 @@ pub fn validate(workflow: &Workflow) -> Vec<ValidationIssue> {
             continue;
         }
         validate_collection_node(workflow, node, &mut issues);
+        validate_error_policy(workflow, node, &mut issues);
+        validate_custom_function(node, &mut issues);
         let reachable_sources = upstream_node_ids(workflow, &node.id);
         for (field_path, source) in expression_strings(&node.configuration, "configuration") {
             if field_path.starts_with("configuration.pinnedData")
@@ -621,6 +624,123 @@ pub fn validate(workflow: &Workflow) -> Vec<ValidationIssue> {
         }
     }
     issues
+}
+
+fn validate_typed_edge(workflow: &Workflow, edge: &crate::WorkflowEdge, issues: &mut Vec<ValidationIssue>) {
+    let Some(source) = workflow.nodes.iter().find(|node| node.id == edge.source_node_id) else { return; };
+    let Some(target) = workflow.nodes.iter().find(|node| node.id == edge.target_node_id) else { return; };
+    let source_key = edge.source_port.as_deref().unwrap_or(&edge.source_handle);
+    let target_key = edge.target_port.as_deref().unwrap_or(&edge.target_handle);
+    // `output` and `input` are legacy control-flow handles. Explicit named ports
+    // are checked against the authoritative contract.
+    if matches!(source_key, "output" | "success") && target_key == "input" { return; }
+    let source_type = source.customization.as_ref()
+        .and_then(|customization| customization.outputs.iter().find(|port| port.key == source_key).map(|port| port.value_type.clone()))
+        .or_else(|| contract_for(&source.node_type).and_then(|contract| contract.outputs.into_iter().find(|port| port.key == source_key).map(|port| port.value_type)));
+    let target_type = target.customization.as_ref()
+        .and_then(|customization| customization.inputs.iter().find(|port| port.key == target_key).map(|port| port.value_type.clone()))
+        .or_else(|| contract_for(&target.node_type).and_then(|contract| contract.inputs.into_iter().find(|port| port.key == target_key).map(|port| port.value_type)));
+    if source_type.is_none() && source.node_type == "custom_function" && source_key != "error" {
+        issues.push(issue("source_port_missing", format!("{} has no output port '{source_key}'.", source.name), Some(source.id.clone()), Some(edge.id.clone())));
+    }
+    if target_type.is_none() && target.node_type == "custom_function" && target_key != "input" {
+        issues.push(issue("target_port_missing", format!("{} has no input port '{target_key}'.", target.name), Some(target.id.clone()), Some(edge.id.clone())));
+    }
+    if let (Some(source_type), Some(target_type)) = (source_type, target_type) {
+        if !value_types_compatible(&source_type, &target_type) {
+            issues.push(issue("port_type_incompatible", format!("Cannot connect {source_key} ({source_type:?}) to {target_key} ({target_type:?})."), Some(target.id.clone()), Some(edge.id.clone())));
+        }
+    }
+}
+
+fn validate_error_policy(workflow: &Workflow, node: &WorkflowNode, issues: &mut Vec<ValidationIssue>) {
+    let policy = node.error_policy.clone().unwrap_or_default();
+    if TRIGGERS.contains(&node.node_type.as_str()) && node.error_policy.is_some() {
+        issues.push(issue("trigger_error_policy_unsupported", "Trigger nodes cannot use an error policy.", Some(node.id.clone()), None));
+        return;
+    }
+    if policy.max_retries > 5 {
+        issues.push(issue("retry_count_out_of_range", "Retries must be between 0 and 5.", Some(node.id.clone()), None));
+    }
+    if policy.retry_delay_ms > 30_000 {
+        issues.push(issue("retry_delay_out_of_range", "Retry delay must be between 0 and 30 seconds.", Some(node.id.clone()), None));
+    }
+    if policy.max_retries > 0 {
+        match contract_for(&node.node_type) {
+            Some(contract) if contract.effect_level == EffectLevel::Destructive || contract.retry_safety == RetrySafety::Unsafe =>
+                issues.push(issue("retry_not_safe", "This operation cannot be retried automatically.", Some(node.id.clone()), None)),
+            Some(contract) if contract.retry_safety == RetrySafety::IdempotencyRequired =>
+                issues.push(issue("retry_idempotency_required", "This operation needs declared idempotency support before retries can be enabled.", Some(node.id.clone()), None)),
+            _ => {}
+        }
+    }
+    let error_edges = workflow.edges.iter().filter(|edge| edge.source_node_id == node.id && edge.source_handle == "error").count();
+    match policy.strategy {
+        ErrorStrategy::Route if error_edges != 1 => issues.push(issue("error_route_edge_count", format!("Route policy requires exactly one connected error edge; found {error_edges}."), Some(node.id.clone()), None)),
+        ErrorStrategy::Fail | ErrorStrategy::Fallback if error_edges > 0 => issues.push(issue("error_edge_without_route", "The reserved error edge is only available when the route policy is selected.", Some(node.id.clone()), None)),
+        _ => {}
+    }
+    if policy.strategy == ErrorStrategy::Fallback {
+        let Some(values) = policy.fallback_outputs.as_object() else {
+            issues.push(issue("fallback_outputs_invalid", "Fallback outputs must be an object.", Some(node.id.clone()), None));
+            return;
+        };
+        let outputs = node.customization.as_ref().map(|customization| customization.outputs.clone()).unwrap_or_else(|| contract_for(&node.node_type).map(|contract| contract.outputs.into_iter().map(|port| crate::CustomPortDefinition { key: port.key, label: port.label, value_type: port.value_type, required: port.required }).collect()).unwrap_or_default());
+        for output in outputs.iter().filter(|output| output.required) {
+            match values.get(&output.key) {
+                None => issues.push(issue("fallback_output_missing", format!("Fallback output '{}' is required.", output.key), Some(node.id.clone()), None)),
+                Some(value) if !json_matches_type(value, &output.value_type) => issues.push(issue("fallback_output_type", format!("Fallback output '{}' has the wrong type.", output.key), Some(node.id.clone()), None)),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn validate_custom_function(node: &WorkflowNode, issues: &mut Vec<ValidationIssue>) {
+    if node.node_type != "custom_function" { return; }
+    let Some(customization) = &node.customization else {
+        issues.push(issue("custom_contract_missing", "Custom function contract and source are required.", Some(node.id.clone()), None));
+        return;
+    };
+    if !matches!(customization.language.as_str(), "javascript" | "python") {
+        issues.push(issue("custom_language_unsupported", "Custom functions support JavaScript or Python.", Some(node.id.clone()), None));
+    }
+    if customization.source_code.trim().is_empty() {
+        issues.push(issue("custom_source_missing", "Custom function source cannot be empty.", Some(node.id.clone()), None));
+    }
+    let valid_source = contract_for(&customization.source_type).is_some_and(|contract| contract.customizable && contract.effect_level == EffectLevel::Pure);
+    if !valid_source {
+        issues.push(issue("custom_source_not_pure", "Only pure, customizable built-in nodes can be used as a source.", Some(node.id.clone()), None));
+    }
+    for (count, limit, code, label) in [(customization.inputs.len(),16,"custom_input_limit","inputs"),(customization.outputs.len(),16,"custom_output_limit","outputs"),(customization.branches.len(),8,"custom_branch_limit","branches")] {
+        if count > limit { issues.push(issue(code, format!("Custom functions support at most {limit} {label}."), Some(node.id.clone()), None)); }
+    }
+    let mut keys = HashSet::new();
+    for port in customization.inputs.iter().chain(&customization.outputs).chain(&customization.branches) {
+        if !valid_identifier(&port.key) || port.key == "error" {
+            issues.push(issue("custom_port_identifier", format!("'{}' is not a valid port key; 'error' is reserved.", port.key), Some(node.id.clone()), None));
+        }
+        if !keys.insert(port.key.as_str()) {
+            issues.push(issue("custom_port_duplicate", format!("Port key '{}' is duplicated.", port.key), Some(node.id.clone()), None));
+        }
+    }
+    if customization.tests.is_empty() {
+        issues.push(issue("custom_tests_required", "Add and pass saved fixtures before this custom function can run.", Some(node.id.clone()), None));
+    }
+}
+
+fn valid_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    chars.next().is_some_and(|first| first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn json_matches_type(value: &Value, value_type: &ValueType) -> bool {
+    match value_type {
+        ValueType::Any => true, ValueType::String | ValueType::Path | ValueType::Connection => value.is_string(),
+        ValueType::Number => value.is_number(), ValueType::Boolean => value.is_boolean(),
+        ValueType::Object => value.is_object(), ValueType::Array => value.is_array(),
+    }
 }
 
 enum ArraySchema {
@@ -1326,6 +1446,8 @@ mod tests {
                 disabled: false,
                 input_bindings: Default::default(),
                 plugin: None,
+                customization: None,
+                error_policy: None,
             })
             .collect();
         Workflow {
