@@ -376,7 +376,7 @@ export function HistoryView() {
                 <button key={run.id} onClick={() => selectExecution(run)}>
                   <span>
                     <b>{item?.name ?? "Deleted workflow"}</b>
-                    {run.error && <small>{run.error.message}</small>}
+                    {run.error && <small className="history-run-error">{run.error.message}</small>}
                   </span>
                   <span className="muted-cell">
                     <Clock3 size={13} />

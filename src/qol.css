@@ -2434,6 +2434,25 @@ input[type="checkbox"] {
 .issue-summary-info { color: var(--info); background: color-mix(in srgb, var(--info) 7%, transparent); }
 .validation-list { display: grid; gap: 6px; }
 .validation-list .issue-notice { max-width: 720px; }
+
+/* Keep warning and execution details readable in both the editor drawer and
+   the full run-history view without changing the density of the rest of UI. */
+:is(.execution-drawer,.history-detail) .issue-notice { grid-template-columns: 20px minmax(0,1fr); gap: 10px; padding: 11px 12px; }
+:is(.execution-drawer,.history-detail) .issue-level { font-size: 10px; }
+:is(.execution-drawer,.history-detail) .issue-copy > header code { font-size: 10px; }
+:is(.execution-drawer,.history-detail) .issue-copy > b { font-size: 12px; line-height: 1.5; }
+:is(.execution-drawer,.history-detail) .issue-copy > p { font-size: 11px; line-height: 1.55; }
+:is(.execution-drawer,.history-detail) .issue-copy > footer a,
+:is(.execution-drawer,.history-detail) .issue-copy > footer button { font-size: 10px; }
+.execution-drawer .issue-summary > span { font-size: 10px; }
+:is(.execution-drawer,.history-detail) .timeline button b { font-size: 12px; }
+:is(.execution-drawer,.history-detail) .timeline button small { font-size: 11px !important; line-height: 1.45; }
+:is(.execution-drawer,.history-detail) .node-execution-detail h3 { font-size: 14px; }
+:is(.execution-drawer,.history-detail) .node-execution-detail header > div:last-child { font-size: 11px; }
+:is(.execution-drawer,.history-detail) .detail-tabs button { font-size: 12px; }
+:is(.execution-drawer,.history-detail) .code-block pre,
+:is(.execution-drawer,.history-detail) .logs { font-size: 12px !important; line-height: 1.6; }
+:root .history-run-error { font-size: 12px !important; line-height: 1.45; }
 .permission-icon.locked { border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 10%, var(--surface)); color: var(--warning); }
 .permission-icon.granted { border-color: color-mix(in srgb, var(--success) 38%, var(--border)); background: color-mix(in srgb, var(--success) 10%, var(--surface)); color: var(--success); }
 .permission-modal .issue-notice { margin-bottom: 14px; }
