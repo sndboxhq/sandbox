@@ -10,10 +10,11 @@ import { LoadingSkeleton } from "./components/ui/States";
 import { useToast } from "./components/ui/Toast";
 import { ConfirmDialog } from "./components/ui/Dialog";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
+import { CommandShell } from "./components/CommandShell";
 import { isTextEntryTarget, useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "./workspaceState";
-import { WORKFLOW_TEMPLATES } from "./workflowTemplates";
 import { parseDeepLink, type DeepLinkRequest } from "./deepLinks";
+import { WORKFLOW_TEMPLATES } from "./workflowTemplates";
 import "./plugins.css";
 
 const Dashboard = lazy(() =>
@@ -22,9 +23,7 @@ const Dashboard = lazy(() =>
   })),
 );
 const CommandPalette = lazy(() =>
-  import("./components/CommandPalette").then((module) => ({
-    default: module.CommandPalette,
-  })),
+  import("./components/CommandPalette").then((module) => ({ default: module.CommandPalette })),
 );
 const HistoryView = lazy(() =>
   import("./components/HistoryView").then((module) => ({
@@ -119,9 +118,11 @@ export default function App() {
     if (event.key === "?" && !event.ctrlKey && !event.metaKey) { event.preventDefault(); setShortcutsOpen(true); return; }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (view === "editor") window.dispatchEvent(new CustomEvent("sandbox:open-node-picker"));
-        else setCommandOpen((value) => !value);
+        setCommandOpen(true);
+        window.dispatchEvent(new CustomEvent("sandbox:open-command-shell"));
+        return;
     }
+    if ((event.ctrlKey || event.metaKey) && event.key === "`") { event.preventDefault(); setCommandOpen(value => !value); }
   }, [view]);
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
@@ -216,10 +217,7 @@ export default function App() {
       setApprovalBusy(false);
     }
   };
-  const openCommands = () =>
-    view === "editor"
-      ? window.dispatchEvent(new CustomEvent("sandbox:open-node-picker"))
-      : setCommandOpen(true);
+  const openCommands = () => { setCommandOpen(true); window.dispatchEvent(new CustomEvent("sandbox:open-command-shell")); };
   const dismissDeepLink = () => setDeepLinks((current) => current.slice(1));
   const confirmDeepLink = async () => {
     if (!deepLink) return;
@@ -248,6 +246,7 @@ export default function App() {
     <div className="app-shell">
       <Sidebar onCommand={openCommands} />
       <div className="app-main">
+        <div className="app-content-frame">
         <AsyncErrorBoundary onHome={() => setView("workflows")}>
           <Suspense
             fallback={
@@ -265,10 +264,12 @@ export default function App() {
             {view === "editor" && activeWorkflow && <WorkflowEditor />}
           </Suspense>
         </AsyncErrorBoundary>
+        </div>
+        <CommandShell open={commandOpen} onOpenChange={setCommandOpen} onShortcuts={() => setShortcutsOpen(true)} onLauncher={() => window.dispatchEvent(new CustomEvent("sandbox:open-quick-launcher"))} />
       </div>
       <Suspense fallback={null}><ActiveAiTabs /></Suspense>
       <Suspense fallback={null}><CommandPalette
-        open={commandOpen}
+        open={false}
         onClose={() => setCommandOpen(false)}
         onCreate={() => {
           setView("workflows");

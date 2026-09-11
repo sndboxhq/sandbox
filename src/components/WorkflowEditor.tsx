@@ -75,6 +75,7 @@ import type {
   WorkflowNode,
   WorkflowRevisionSummary,
 } from "../types";
+import { CustomNodeEditor } from "./CustomNodeEditor";
 import { BrowserRecorder } from "./BrowserRecorder";
 import {
   AiWorkflowChat,
@@ -110,7 +111,9 @@ function workflowNodeHandles(node: WorkflowNode): Node<WorkflowNodeData>["handle
   const handleSize = 9;
   const centeredHandleOffset = (workflowNodeDimensions.height - handleSize) / 2;
 
-  const configuredInputPorts = node.type === "web_builder"
+  const configuredInputPorts = node.type === "custom_function"
+    ? (node.customization?.inputs.map(port=>({id:port.key}))??[])
+    : node.type === "web_builder"
     ? WEB_BUILDER_INPUT_PORTS.map(port=>({id:port.id}))
     : node.type === "merge"
       ? ((node.configuration.inputPorts as Array<{id:string}>|undefined)??[])
@@ -179,12 +182,16 @@ function workflowNodeHandles(node: WorkflowNode): Node<WorkflowNodeData>["handle
 }
 
 function workflowOutputHandles(node:WorkflowNode):string[]{
+  if(node.type==="custom_function")return [...(node.customization?.outputs.map(port=>port.key)??[]),...(node.customization?.branches.map(port=>port.key)??[]),...(node.errorPolicy?.strategy==="route"?["error"]:[])];
   if(node.type==="switch")return [...(((node.configuration.cases as Array<{id:string}>|undefined)??[]).map(item=>item.id)),String(node.configuration.fallbackBranchId??"fallback")];
   if(node.type==="filter"||node.type==="split_out")return ["output","rejected"];
   if(node.type==="loop_over_items")return ["loop","done"];
   if(node.type==="remove_duplicates")return ["output","duplicates"];
   return [];
 }
+
+const CUSTOMIZABLE_SOURCES=new Set<NodeType>(["condition","filter","switch","split_out","aggregate","merge","remove_duplicates","set_data"]);
+async function contractHash(value:unknown){const bytes=new TextEncoder().encode(JSON.stringify(value));const digest=await crypto.subtle.digest("SHA-256",bytes);return [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,"0")).join("")}
 
 interface RecoveryContext {
   workflowId: string;
@@ -269,6 +276,8 @@ export function WorkflowEditor() {
   const aiOpenRequested = useAiWorkflowStore((state) => state.sessions[workflow.id]?.openRequested ?? false);
   const consumeAiOpenRequest = useAiWorkflowStore((state) => state.consumeOpenRequest);
   const [announcement, setAnnouncement] = useState("");
+  const [customDraft,setCustomDraft]=useState<{node:WorkflowNode;source?:WorkflowNode;initial:string;isNew:boolean}>();
+  const [customLeaveOpen,setCustomLeaveOpen]=useState(false);
   const [browserProfiles, setBrowserProfiles] = useState<BrowserProfile[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>(
     [],
@@ -691,6 +700,17 @@ export function WorkflowEditor() {
     },
     [workflow, commit],
   );
+  const openCustomEditor = useCallback(async (id:string) => {
+    const source=workflow.nodes.find(node=>node.id===id);if(!source)return;
+    if(source.type==="custom_function"&&source.customization){setCustomDraft({node:structuredClone(source),initial:JSON.stringify(source),isNew:false});return}
+    if(!CUSTOMIZABLE_SOURCES.has(source.type)){toast.push("Only pure built-in transformation nodes can create a custom version in this release.","info");return}
+    const definition=definitionFor(source.type);const branches=workflowOutputHandles(source).map(key=>({key,label:key.replaceAll("_"," "),type:"any" as const,required:false}));
+    const sourceContractHash=await contractHash({type:source.type,version:source.version,inputs:definition.inputs,outputs:definition.outputs,branches,configuration:source.configuration});
+    const outputs=structuredClone(definition.outputs);const outputObject=Object.fromEntries(outputs.map(port=>[port.key,null]));
+    const custom:WorkflowNode={id:`custom_function_${crypto.randomUUID().slice(0,8)}`,type:"custom_function",version:1,name:`${source.name} custom`,position:{x:source.position.x+48,y:source.position.y+48},configuration:{},disabled:false,inputBindings:{},customization:{sourceType:source.type,sourceVersion:source.version,sourceName:source.name,sourceContractHash,language:"javascript",sourceCode:`// Return exactly { outputs, branches? }.\nreturn { outputs: ${JSON.stringify(outputObject,null,2)}, branches: {} };\n`,description:definition.description,inputs:structuredClone(definition.inputs),outputs,branches,tests:[],runtimeRequirement:">=20"},errorPolicy:{strategy:"fail",maxRetries:0,retryDelayMs:0,backoff:"fixed",fallbackOutputs:{}}};
+    setCustomDraft({node:custom,source:structuredClone(source),initial:JSON.stringify(custom),isNew:true});
+  },[toast,workflow.nodes]);
+  useEffect(()=>{const handler=(event:Event)=>{const {action,nodeId}=(event as CustomEvent<{action:string;nodeId:string}>).detail??{};if(!nodeId)return;if(action==="select")setSelectedNodeId(nodeId);else if(action==="customize")void openCustomEditor(nodeId);else if(action==="delete")removeNode(nodeId);else if(action==="enable"||action==="disable")commit({...workflow,nodes:workflow.nodes.map(node=>node.id===nodeId?{...node,disabled:action==="disable"}:node)})};window.addEventListener("sandbox:node-command",handler);return()=>window.removeEventListener("sandbox:node-command",handler)},[commit,openCustomEditor,removeNode,workflow]);
   const undo = useCallback(() => {
     const previous = past.current.pop();
     if (previous) {
@@ -1049,6 +1069,10 @@ export function WorkflowEditor() {
     const next = connectWorkflowNodes(workflow, connection);
     if (next) commit(next);
   };
+  if(customDraft)return <>
+    <CustomNodeEditor workflow={workflow} node={customDraft.node} source={customDraft.source} onChange={node=>setCustomDraft(current=>current?{...current,node}:current)} onSave={()=>{const next=customDraft.isNew?{...workflow,nodes:[...workflow.nodes,customDraft.node]}:{...workflow,nodes:workflow.nodes.map(node=>node.id===customDraft.node.id?customDraft.node:node)};commit(next);setSelectedNodeId(customDraft.node.id);setCustomDraft(undefined);toast.push("Custom ƒx draft saved to the workflow. Verify its fixtures before running.","success")}} onBack={()=>{if(JSON.stringify(customDraft.node)!==customDraft.initial)setCustomLeaveOpen(true);else setCustomDraft(undefined)}} onAi={()=>{setAiChatContext({key:`custom:${customDraft.node.id}`,label:`Custom function: ${customDraft.node.name}`,prompt:`Help improve the ${customDraft.node.customization?.language} custom function and its declared sndbox input, output, and branch contract. It must return { outputs, branches? } and cannot use ambient host capabilities.`});setAiChatOpen(true)}}/>
+    <ConfirmDialog open={customLeaveOpen} onOpenChange={setCustomLeaveOpen} title="Discard custom function changes?" description="Code, contract, and fixture edits in this full-page draft have not been saved to the workflow." confirmLabel="Discard changes" destructive onConfirm={()=>{setCustomLeaveOpen(false);setCustomDraft(undefined)}}/>
+  </>;
   return (
     <main
       className="editor"
