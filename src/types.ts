@@ -55,6 +55,8 @@ export interface NodeGate { state:GateState; code:string; message:string; remedi
 export interface CustomNodeVerification { workflowId:string; nodeId:string; fingerprint:string; passedAt:string; outputCoverage:string[]; branchCoverage:string[]; runtimeVersion:string }
 export interface CustomFixtureResult { id:string; name:string; passed:boolean; durationMs:number; logs:string[]; error?:string }
 export interface CustomNodeTestReport { passed:boolean; fingerprint:string; outputCoverage:string[]; branchCoverage:string[]; fixtures:CustomFixtureResult[]; verification?:CustomNodeVerification }
+export interface DesktopIntegrationSettings { shortcut:string; shortcutEnabled:boolean; startAtLogin:boolean; shortcutError?:string|null }
+export interface WorkflowImportInspection { inspectionId:string; sourcePath:string; name:string; description:string; sourceSchemaVersion:number; nodeCount:number; requiredNodeTypes:string[]; warnings:string[] }
 export interface ExecutionQuery { search?:string; workflowIds?:string[]; statuses?:ExecutionStatus[]; triggerTypes?:string[]; startedAfter?:string; startedBefore?:string; cursor?:string; limit?:number }
 export interface ExecutionPage { items:ExecutionRecord[]; nextCursor?:string }
 export interface RunnerStatus { paused:boolean; activeWorkflowIds:string[]; localSchedulesStopOnQuit:boolean; scheduledWorkflowCount:number; nextRunAt?:string }

@@ -16,6 +16,7 @@ import type {
   ConnectionMetadata,
   CustomNodeTestReport,
   CustomNodeVerification,
+  DesktopIntegrationSettings,
   ExecutionPage,
   ExecutionQuery,
   ExecutionRecord,
@@ -33,6 +34,7 @@ import type {
   StructuredLocator,
   ValidationIssue,
   Workflow,
+  WorkflowImportInspection,
   WorkflowMetadataPatch,
   WorkflowRevisionSummary,
   WorkflowSummary,
@@ -86,14 +88,38 @@ export const api = {
             "Workflow export uses a native file picker in the desktop application.",
           ),
         ),
-  importWorkflow: () =>
+  inspectWorkflowImport: () =>
     tauri
-      ? invoke<Workflow | undefined>("import_workflow")
+      ? invoke<WorkflowImportInspection | undefined>("inspect_workflow_import")
       : Promise.reject(
           new Error(
             "Workflow import uses a native file picker in the desktop application.",
           ),
         ),
+  inspectWorkflowPath: (path: string) =>
+    tauri
+      ? invoke<WorkflowImportInspection>("inspect_workflow_path", { path })
+      : Promise.reject(new Error("Workflow file inspection requires the desktop application.")),
+  confirmWorkflowImport: (inspectionId: string) =>
+    tauri
+      ? invoke<Workflow>("confirm_workflow_import", { inspectionId })
+      : Promise.reject(new Error("Workflow import requires the desktop application.")),
+  cancelWorkflowImport: (inspectionId: string) =>
+    tauri ? invoke<void>("cancel_workflow_import", { inspectionId }) : Promise.resolve(),
+  takeWorkflowFileRequests: () =>
+    tauri ? invoke<string[]>("take_workflow_file_requests") : Promise.resolve([]),
+  openQuickLauncher: () =>
+    tauri ? invoke<void>("open_quick_launcher") : Promise.resolve(),
+  revealWorkflow: (workflowId: string) =>
+    tauri ? invoke<void>("reveal_workflow", { workflowId }) : Promise.resolve(),
+  desktopIntegrationSettings: () =>
+    tauri
+      ? invoke<DesktopIntegrationSettings>("desktop_integration_settings")
+      : Promise.resolve({ shortcut: "Ctrl+Shift+Space", shortcutEnabled: true, startAtLogin: false }),
+  setDesktopIntegrationSettings: (next: DesktopIntegrationSettings) =>
+    tauri
+      ? invoke<DesktopIntegrationSettings>("set_desktop_integration_settings", { next })
+      : Promise.resolve(next),
   deleteWorkflow: (id: string) =>
     tauri
       ? invoke<void>("delete_workflow", { id })

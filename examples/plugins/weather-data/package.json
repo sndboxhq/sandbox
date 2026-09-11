@@ -1,6 +1,6 @@
 {
   "name": "@sandbox/example-weather-data",
-  "version": "0.7.2-beta.4",
+  "version": "0.8.0-beta.1",
   "private": true,
   "scripts": {
     "build": "cargo build --manifest-path guest/Cargo.toml --target wasm32-unknown-unknown --release && node -e \"const fs=require('node:fs');fs.mkdirSync('components',{recursive:true});fs.copyFileSync('guest/target/wasm32-unknown-unknown/release/sandbox_example_weather_guest.wasm','components/main.wasm')\""

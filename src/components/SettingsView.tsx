@@ -27,6 +27,7 @@ import type {
   BrowserEngineStatus,
   BrowserProfile,
   BrowserProfileSettings,
+  DesktopIntegrationSettings,
 } from "../types";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { ConfirmDialog, FocusDialog } from "./ui/Dialog";
@@ -39,6 +40,7 @@ const defaults: BrowserProfileSettings = {
 };
 type SettingsSectionId =
   | "general"
+  | "desktop"
   | "appearance"
   | "accessibility"
   | "nodes"
@@ -51,6 +53,7 @@ const settingsSections: Array<{
   icon: ReactNode;
 }> = [
   { id: "general", label: "General", icon: <Settings2 size={15} /> },
+  { id: "desktop", label: "Desktop", icon: <LayoutPanelLeft size={15} /> },
   { id: "appearance", label: "Appearance", icon: <Palette size={15} /> },
   {
     id: "accessibility",
@@ -74,6 +77,11 @@ export function SettingsView() {
   });
   const [profiles, setProfiles] = useState<BrowserProfile[]>([]);
   const [engine, setEngine] = useState<BrowserEngineStatus>();
+  const [desktop, setDesktop] = useState<DesktopIntegrationSettings>({
+    shortcut: "Ctrl+Shift+Space",
+    shortcutEnabled: true,
+    startAtLogin: false,
+  });
   const [editing, setEditing] = useState<BrowserProfile | "new">();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -92,6 +100,7 @@ export function SettingsView() {
           item.label.toLowerCase().includes(settingsSearch.toLowerCase()) ||
           {
             general: "start date unsaved",
+            desktop: "quick launcher global shortcut startup login file association sndbox",
             appearance: "theme light dark system accent density sidebar",
             accessibility: "motion contrast keyboard",
             nodes: "grid canvas editor deletion",
@@ -124,12 +133,14 @@ export function SettingsView() {
 
   const load = async () => {
     try {
-      const [nextProfiles, nextEngine] = await Promise.all([
+      const [nextProfiles, nextEngine, nextDesktop] = await Promise.all([
         api.listBrowserProfiles(),
         api.browserEngineStatus(),
+        api.desktopIntegrationSettings(),
       ]);
       setProfiles(nextProfiles);
       setEngine(nextEngine);
+      setDesktop(nextDesktop);
     } catch (value) {
       setError(`Settings could not load: ${String(value)}`);
     }
@@ -251,6 +262,75 @@ export function SettingsView() {
                 }
               />
               <button className="button" onClick={() => setClearRecoveryOpen(true)}>Clear remembered workspace and recovery drafts</button>
+            </PreferencePanel>
+          )}
+          {section === "desktop" && (
+            <PreferencePanel
+              title="Desktop integration"
+              description="Control how the Windows app, workflow files, and quick launcher behave."
+            >
+              <PreferenceToggle
+                label="Global quick-launcher shortcut"
+                description="Open the compact workflow launcher from anywhere in Windows."
+                checked={desktop.shortcutEnabled}
+                onChange={(shortcutEnabled) =>
+                  setDesktop((current) => ({ ...current, shortcutEnabled }))
+                }
+              />
+              <label className="preference-row preference-input">
+                <span>
+                  <span>
+                    <b>Shortcut</b>
+                    <small>The default is Ctrl+Shift+Space. Conflicts keep the last working shortcut.</small>
+                  </span>
+                </span>
+                <input
+                  aria-label="Quick launcher shortcut"
+                  disabled={!desktop.shortcutEnabled}
+                  value={desktop.shortcut}
+                  onChange={(event) =>
+                    setDesktop((current) => ({
+                      ...current,
+                      shortcut: event.target.value,
+                      shortcutError: undefined,
+                    }))
+                  }
+                />
+              </label>
+              <PreferenceToggle
+                label="Start at login"
+                description="Opt in to starting services and tray support with the main window hidden."
+                checked={desktop.startAtLogin}
+                onChange={(startAtLogin) =>
+                  setDesktop((current) => ({ ...current, startAtLogin }))
+                }
+              />
+              <div className="info-note">
+                <b>.sndbox files</b>
+                <p>Explorer opens and single-file drops are inspected first. Imports stay disabled, receive fresh IDs, and never run on open.</p>
+              </div>
+              {desktop.shortcutError && (
+                <div className="error-banner" role="alert">
+                  {desktop.shortcutError}
+                </div>
+              )}
+              <div className="run-actions">
+                <button
+                  className="button primary"
+                  disabled={busy || !desktop.shortcut.trim()}
+                  onClick={() =>
+                    void act(async () => {
+                      const saved = await api.setDesktopIntegrationSettings(desktop);
+                      setDesktop(saved);
+                    })
+                  }
+                >
+                  Apply desktop settings
+                </button>
+                <button className="button" onClick={() => void api.openQuickLauncher()}>
+                  Open quick launcher
+                </button>
+              </div>
             </PreferencePanel>
           )}
           {section === "appearance" && (

@@ -1,8 +1,13 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Sidebar } from "./components/Sidebar";
 import { api } from "./api";
-import type { PendingApproval, PluginPackageInspection } from "./types";
+import type {
+  PendingApproval,
+  PluginPackageInspection,
+  WorkflowImportInspection,
+} from "./types";
 import { useAppStore } from "./store";
 import { useApplyPreferences, usePreferences } from "./preferences";
 import { AsyncErrorBoundary } from "./components/ui/AsyncErrorBoundary";
@@ -11,6 +16,7 @@ import { useToast } from "./components/ui/Toast";
 import { ConfirmDialog } from "./components/ui/Dialog";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { CommandShell } from "./components/CommandShell";
+import { QuickLauncher } from "./components/QuickLauncher";
 import { isTextEntryTarget, useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "./workspaceState";
 import { parseDeepLink, type DeepLinkRequest } from "./deepLinks";
@@ -23,7 +29,9 @@ const Dashboard = lazy(() =>
   })),
 );
 const CommandPalette = lazy(() =>
-  import("./components/CommandPalette").then((module) => ({ default: module.CommandPalette })),
+  import("./components/CommandPalette").then((module) => ({
+    default: module.CommandPalette,
+  })),
 );
 const HistoryView = lazy(() =>
   import("./components/HistoryView").then((module) => ({
@@ -67,6 +75,15 @@ const ActiveAiTabs = lazy(() =>
 );
 
 export default function App() {
+  return new URLSearchParams(window.location.search).get("window") ===
+    "quick-launcher" ? (
+    <QuickLauncher />
+  ) : (
+    <MainApp />
+  );
+}
+
+function MainApp() {
   const toast = useToast();
   useApplyPreferences();
   const { view, activeWorkflow, workflows, setView } = useAppStore();
@@ -82,6 +99,10 @@ export default function App() {
     useState<PluginPackageInspection>();
   const [deepLinkError, setDeepLinkError] = useState<string>();
   const [deepLinkBusy, setDeepLinkBusy] = useState(false);
+  const [workflowImport, setWorkflowImport] =
+    useState<WorkflowImportInspection>();
+  const [workflowImportBusy, setWorkflowImportBusy] = useState(false);
+  const [workflowImportError, setWorkflowImportError] = useState<string>();
   const deepLink = parseDeepLink(deepLinks[0]);
   useEffect(() => {
     const raw = deepLinks[0];
@@ -143,6 +164,68 @@ export default function App() {
     ).then((unlisten) => (stop = unlisten));
     return () => stop?.();
   }, []);
+  useEffect(() => {
+    const receiveInspection = (event: Event) => {
+      setWorkflowImport(
+        (event as CustomEvent<WorkflowImportInspection>).detail,
+      );
+      setWorkflowImportError(undefined);
+    };
+    const openLauncher = () => {
+      void api.openQuickLauncher().catch((error) =>
+        toast.push(String(error), "error"),
+      );
+    };
+    window.addEventListener(
+      "sandbox:workflow-import-inspected",
+      receiveInspection,
+    );
+    window.addEventListener("sandbox:open-quick-launcher", openLauncher);
+    return () => {
+      window.removeEventListener(
+        "sandbox:workflow-import-inspected",
+        receiveInspection,
+      );
+      window.removeEventListener("sandbox:open-quick-launcher", openLauncher);
+    };
+  }, [toast]);
+  useEffect(() => {
+    if (!api.isDesktop) return;
+    let cancelled = false;
+    const cleanups: Array<() => void> = [];
+    const inspectPaths = async (paths: string[]) => {
+      if (paths.length !== 1) {
+        if (paths.length > 1)
+          toast.push("Drop or open one workflow file at a time.", "error");
+        return;
+      }
+      try {
+        const inspection = await api.inspectWorkflowPath(paths[0]);
+        if (!cancelled) {
+          setWorkflowImport(inspection);
+          setWorkflowImportError(undefined);
+        }
+      } catch (error) {
+        if (!cancelled) toast.push(String(error), "error");
+      }
+    };
+    void api.takeWorkflowFileRequests().then(inspectPaths);
+    void listen<string[]>("workflow-file-requested", (event) =>
+      void inspectPaths(event.payload),
+    ).then((unlisten) => cleanups.push(unlisten));
+    void listen<string>("quick-launcher-workflow", (event) =>
+      void useAppStore.getState().openWorkflow(event.payload),
+    ).then((unlisten) => cleanups.push(unlisten));
+    void getCurrentWebviewWindow()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "drop") void inspectPaths(event.payload.paths);
+      })
+      .then((unlisten) => cleanups.push(unlisten));
+    return () => {
+      cancelled = true;
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [toast]);
   useEffect(() => {
     if (deepLink?.kind !== "view") return;
     let cancelled = false;
@@ -242,6 +325,30 @@ export default function App() {
       setDeepLinkBusy(false);
     }
   };
+  const dismissWorkflowImport = () => {
+    if (workflowImport)
+      void api.cancelWorkflowImport(workflowImport.inspectionId);
+    setWorkflowImport(undefined);
+    setWorkflowImportError(undefined);
+  };
+  const confirmWorkflowImport = async () => {
+    if (!workflowImport) return;
+    setWorkflowImportBusy(true);
+    setWorkflowImportError(undefined);
+    try {
+      const workflow = await api.confirmWorkflowImport(
+        workflowImport.inspectionId,
+      );
+      setWorkflowImport(undefined);
+      await useAppStore.getState().load();
+      await useAppStore.getState().openWorkflow(workflow.id);
+      toast.push(`Imported ${workflow.name} disabled for review.`, "success");
+    } catch (error) {
+      setWorkflowImportError(String(error));
+    } finally {
+      setWorkflowImportBusy(false);
+    }
+  };
   return (
     <div className="app-shell">
       <Sidebar onCommand={openCommands} />
@@ -294,12 +401,9 @@ export default function App() {
             group: "Actions",
             action: () =>
               void api
-                .importWorkflow()
-                .then(async (workflow) => {
-                  if (!workflow) return;
-                  await useAppStore.getState().load();
-                  await useAppStore.getState().openWorkflow(workflow.id);
-                  toast.push(`Imported ${workflow.name}.`, "success");
+                .inspectWorkflowImport()
+                .then((inspection) => {
+                  if (inspection) setWorkflowImport(inspection);
                 })
                 .catch((error) => toast.push(String(error), "error")),
           },
@@ -412,6 +516,32 @@ export default function App() {
         )}
         {deepLink?.kind === "template" && <div className="deep-link-review"><b>{deepLink.template.replaceAll("-", " ")}</b><small>Local workflow · disabled by default</small></div>}
         {deepLinkError && <div className="error-banner">{deepLinkError}</div>}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(workflowImport)}
+        onOpenChange={(open) => !open && dismissWorkflowImport()}
+        title="Import this workflow?"
+        description="The file has been inspected but has not been added. Importing creates fresh IDs, disables the workflow, and clears every inherited approval. It will never run automatically."
+        confirmLabel="Import disabled workflow"
+        busy={workflowImportBusy}
+        onConfirm={() => void confirmWorkflowImport()}
+      >
+        {workflowImport && (
+          <div className="deep-link-review workflow-import-review">
+            <b>{workflowImport.name}</b>
+            {workflowImport.description && <small>{workflowImport.description}</small>}
+            <small>
+              Schema {workflowImport.sourceSchemaVersion} · {workflowImport.nodeCount} nodes
+            </small>
+            <small>
+              Uses: {workflowImport.requiredNodeTypes.join(", ") || "No executable nodes"}
+            </small>
+            {workflowImport.warnings.map((warning) => (
+              <small key={warning} className="warning-banner">{warning}</small>
+            ))}
+          </div>
+        )}
+        {workflowImportError && <div className="error-banner">{workflowImportError}</div>}
       </ConfirmDialog>
     </div>
   );

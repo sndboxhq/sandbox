@@ -60,7 +60,7 @@ async function execute(command:ParsedCommand,ui:{onShortcuts:()=>void;onLauncher
   if(command.path.startsWith("go ")){const view=command.path.slice(3) as View;if(views.has(view)){store.setView(view);return{text:`Opened ${view}.`}}}
   if(command.path==="workflow list"){const items=await api.listWorkflows(Boolean(command.flags.archived));return{text:`${items.length} workflow(s).`,links:items.map(item=>({label:item.workflow.name,detail:item.workflow.id,action:()=>void useAppStore.getState().openWorkflow(item.workflow.id)}))}}
   if(command.path==="workflow create"){await store.createWorkflow(typeof command.flags.template==="string"?command.flags.template:undefined,target||undefined);return{text:`Created ${useAppStore.getState().activeWorkflow?.name??"workflow"}.`}}
-  if(command.path==="workflow import"){const imported=await api.importWorkflow();if(imported){await store.load();await store.openWorkflow(imported.id)}return{text:imported?`Imported ${imported.name} disabled for review.`:"Import cancelled."}}
+  if(command.path==="workflow import"){const inspection=await api.inspectWorkflowImport();if(inspection)window.dispatchEvent(new CustomEvent("sandbox:workflow-import-inspected",{detail:inspection}));return{text:inspection?`Inspected ${inspection.name}. Confirm the staged import to add it.`:"Import cancelled."}}
   const workflowCommands=["workflow open","workflow run","workflow validate","workflow duplicate","workflow enable","workflow disable","workflow archive","workflow export"];
   if(workflowCommands.includes(command.path)){
     const workflow=await resolveWorkflow(target,store.activeWorkflow);

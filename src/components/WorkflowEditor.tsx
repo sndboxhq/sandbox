@@ -763,10 +763,8 @@ export function WorkflowEditor() {
       } else if (e.key === "Escape") {
         setSelectedNodeId(undefined);
         setPicker((p) => ({ ...p, open: false }));
-      } else if (mod && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPicker({ open: true, position: { x: 360, y: 220 } });
       } else if (e.key.toLowerCase() === "a" && !mod) {
+        e.preventDefault();
         setPicker({ open: true, position: { x: 360, y: 220 } });
       }
     };

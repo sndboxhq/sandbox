@@ -11,7 +11,7 @@ use sandbox_engine::{
     NodeContract, NodeGate,
     validation::{validate, ValidationIssue},
     BrowserProfile, BrowserProfileSettings, ConnectionMetadata, ConnectionStatus, ExecutionRecord,
-    InstalledPlugin, PendingApproval, PermissionSummary, StructuredLocator, Workflow,
+    InputBinding, InstalledPlugin, PendingApproval, PermissionSummary, StructuredLocator, Workflow,
     WorkflowMetadataPatch, WorkflowRevisionSummary, WorkflowSummary,
 };
 use serde::{Deserialize, Serialize};
@@ -105,7 +105,50 @@ pub struct DesktopIntegrationSettings {
 }
 
 impl Default for DesktopIntegrationSettings {
-    fn default() -> Self { Self { shortcut: "Ctrl+Shift+Space".into(), shortcut_enabled: true, start_at_login: false, shortcut_error: None } }
+    fn default() -> Self {
+        Self {
+            shortcut: "Ctrl+Shift+Space".into(),
+            shortcut_enabled: true,
+            start_at_login: false,
+            shortcut_error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowImportInspection {
+    pub inspection_id: String,
+    pub source_path: String,
+    pub name: String,
+    pub description: String,
+    pub source_schema_version: u32,
+    pub node_count: usize,
+    pub required_node_types: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+pub fn initialize_desktop_integration(app: &AppHandle, database: &sandbox_engine::Database) {
+    let mut settings = database
+        .get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if settings.shortcut_enabled {
+        if let Err(error) = app.global_shortcut().register(settings.shortcut.as_str()) {
+            settings.shortcut_error = Some(format!(
+                "{} is already in use. Choose another shortcut; no replacement was registered: {error}",
+                settings.shortcut
+            ));
+        } else {
+            settings.shortcut_error = None;
+        }
+    }
+    settings.start_at_login = app
+        .autolaunch()
+        .is_enabled()
+        .unwrap_or(settings.start_at_login);
+    let _ = database.set_setting(DESKTOP_INTEGRATION_KEY, &settings);
 }
 
 pub fn show_quick_launcher(app: &AppHandle) -> std::result::Result<(), String> {
@@ -119,7 +162,25 @@ pub fn show_quick_launcher(app: &AppHandle) -> std::result::Result<(), String> {
 }
 
 #[tauri::command]
-pub fn open_quick_launcher(app: AppHandle) -> Result<()> { show_quick_launcher(&app) }
+pub fn open_quick_launcher(app: AppHandle) -> Result<()> {
+    show_quick_launcher(&app)
+}
+
+#[tauri::command]
+pub fn reveal_workflow(workflow_id: String, app: AppHandle) -> Result<()> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "The main window is not available.".to_string())?;
+    window.show().map_err(err)?;
+    window.unminimize().map_err(err)?;
+    window.set_focus().map_err(err)?;
+    app.emit("quick-launcher-workflow", workflow_id)
+        .map_err(err)?;
+    if let Some(launcher) = app.get_webview_window("quick-launcher") {
+        let _ = launcher.hide();
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub fn desktop_integration_settings(app: AppHandle, state: State<'_, AppState>) -> Result<DesktopIntegrationSettings> {
@@ -981,13 +1042,13 @@ pub async fn export_workflow(
         "templateMetadata": Value::Null,
         "warnings": if local_path_fields.is_empty() { Vec::<String>::new() } else { vec!["Local absolute paths were removed. Select approved files or folders after import.".to_string()] }
     });
-    let suggested = format!("{}.sandbox-workflow.json", safe_filename(&workflow.name));
+    let suggested = format!("{}.sndbox", safe_filename(&workflow.name));
     let selection = tokio::task::spawn_blocking(move || {
         app.dialog()
             .file()
             .set_title("Export workflow")
             .set_file_name(suggested)
-            .add_filter("sndbox workflow", &["json"])
+            .add_filter("sndbox workflow", &["sndbox"])
             .blocking_save_file()
     })
     .await
@@ -1004,24 +1065,21 @@ pub async fn export_workflow(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
-#[tauri::command]
-pub async fn import_workflow(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Option<Workflow>> {
-    let selection = tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("Import workflow")
-            .add_filter("sndbox workflow", &["json"])
-            .blocking_pick_file()
-    })
-    .await
-    .map_err(err)?;
-    let Some(selection) = selection else {
-        return Ok(None);
-    };
-    let path = selection.into_path().map_err(err)?;
+fn is_workflow_file(path: &std::path::Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    name.ends_with(".sndbox") || name.ends_with(".sandbox-workflow.json")
+}
+
+fn prepare_workflow_import(
+    path: &std::path::Path,
+) -> Result<(WorkflowImportInspection, Workflow)> {
+    if !is_workflow_file(path) {
+        return Err("Choose a .sndbox or legacy .sandbox-workflow.json file.".into());
+    }
     let metadata = std::fs::metadata(&path).map_err(err)?;
     if metadata.len() > 2 * 1024 * 1024 {
         return Err("The selected workflow exceeds the 2 MB import limit.".into());
@@ -1034,18 +1092,18 @@ pub async fn import_workflow(
     if contains_secret_material(&package) {
         return Err("The import contains raw secret material. Remove tokens, passwords, cookies, and webhook URLs before importing.".into());
     }
-    let schema = package
+    let source_schema_version = package
         .get("schemaVersion")
         .and_then(Value::as_u64)
         .ok_or_else(|| "The workflow export does not declare a schema version.".to_string())?
         as u32;
-    if schema > sandbox_engine::CURRENT_SCHEMA_VERSION {
+    if source_schema_version > sandbox_engine::CURRENT_SCHEMA_VERSION {
         return Err(format!(
-            "This workflow uses schema version {schema}, but this build supports up to version {}.",
+            "This workflow uses schema version {source_schema_version}, but this build supports up to version {}.",
             sandbox_engine::CURRENT_SCHEMA_VERSION
         ));
     }
-    if schema == 0 {
+    if source_schema_version == 0 {
         return Err("Workflow schema version 0 is not supported.".into());
     }
     let mut definition = package
@@ -1066,23 +1124,161 @@ pub async fn import_workflow(
     workflow.schema_version = sandbox_engine::CURRENT_SCHEMA_VERSION;
     workflow.created_at = Utc::now();
     workflow.updated_at = Utc::now();
-    workflow.settings.permissions = PermissionSummary {
-        approved_network_domains: package
-            .pointer("/requiredPermissions/networkDomains")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect(),
-        ..PermissionSummary::default()
+    workflow.settings.permissions = PermissionSummary::default();
+
+    let node_ids = workflow
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), Uuid::new_v4().to_string()))
+        .collect::<std::collections::HashMap<_, _>>();
+    workflow.trigger_node_id = node_ids
+        .get(&workflow.trigger_node_id)
+        .cloned()
+        .ok_or_else(|| "The imported trigger does not correspond to a workflow node.".to_string())?;
+    for node in &mut workflow.nodes {
+        node.id = node_ids
+            .get(&node.id)
+            .cloned()
+            .ok_or_else(|| "The import contains an invalid node identifier.".to_string())?;
+        for binding in node.input_bindings.values_mut() {
+            if let InputBinding::NodeOutput { node_id, .. } = binding {
+                *node_id = node_ids
+                    .get(node_id)
+                    .cloned()
+                    .ok_or_else(|| "An imported input refers to a missing node.".to_string())?;
+            }
+        }
+    }
+    for edge in &mut workflow.edges {
+        edge.id = Uuid::new_v4().to_string();
+        edge.source_node_id = node_ids
+            .get(&edge.source_node_id)
+            .cloned()
+            .ok_or_else(|| "An imported connection has a missing source node.".to_string())?;
+        edge.target_node_id = node_ids
+            .get(&edge.target_node_id)
+            .cloned()
+            .ok_or_else(|| "An imported connection has a missing target node.".to_string())?;
+    }
+
+    let mut required_node_types = package
+        .get("requiredNodeTypes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if required_node_types.is_empty() {
+        required_node_types = workflow
+            .nodes
+            .iter()
+            .map(|node| node.node_type.clone())
+            .collect();
+        required_node_types.sort();
+        required_node_types.dedup();
+    }
+    let mut warnings = package
+        .get("warnings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    warnings.push(
+        "The imported workflow is disabled and all inherited approvals were cleared."
+            .into(),
+    );
+    if workflow
+        .nodes
+        .iter()
+        .any(|node| node.node_type == "custom_function")
+    {
+        warnings.push(
+            "Custom ƒx nodes are unverified on this device and must pass their fixtures before execution."
+                .into(),
+        );
+    }
+    let inspection = WorkflowImportInspection {
+        inspection_id: Uuid::new_v4().to_string(),
+        source_path: path.to_string_lossy().to_string(),
+        name: workflow.name.clone(),
+        description: workflow.description.clone(),
+        source_schema_version,
+        node_count: workflow.nodes.len(),
+        required_node_types,
+        warnings,
     };
-    let saved = state
+    Ok((inspection, workflow))
+}
+
+#[tauri::command]
+pub async fn inspect_workflow_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<WorkflowImportInspection>> {
+    let selection = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Inspect workflow before importing")
+            .add_filter("sndbox workflow", &["sndbox", "json"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(err)?;
+    let Some(selection) = selection else {
+        return Ok(None);
+    };
+    let path = selection.into_path().map_err(err)?;
+    inspect_workflow_path_inner(&path, &state).map(Some)
+}
+
+fn inspect_workflow_path_inner(
+    path: &std::path::Path,
+    state: &State<'_, AppState>,
+) -> Result<WorkflowImportInspection> {
+    let (inspection, workflow) = prepare_workflow_import(path)?;
+    state
+        .pending_workflow_imports
+        .lock()
+        .insert(inspection.inspection_id.clone(), workflow);
+    Ok(inspection)
+}
+
+#[tauri::command]
+pub fn inspect_workflow_path(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<WorkflowImportInspection> {
+    inspect_workflow_path_inner(std::path::Path::new(&path), &state)
+}
+
+#[tauri::command]
+pub fn confirm_workflow_import(
+    inspection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Workflow> {
+    let workflow = state
+        .pending_workflow_imports
+        .lock()
+        .remove(&inspection_id)
+        .ok_or_else(|| "This import inspection expired. Inspect the file again.".to_string())?;
+    state
         .engine
         .database()
         .save_workflow(workflow)
-        .map_err(err)?;
-    Ok(Some(saved))
+        .map_err(err)
+}
+
+#[tauri::command]
+pub fn cancel_workflow_import(inspection_id: String, state: State<'_, AppState>) {
+    state.pending_workflow_imports.lock().remove(&inspection_id);
+}
+
+#[tauri::command]
+pub fn take_workflow_file_requests(state: State<'_, AppState>) -> Vec<String> {
+    std::mem::take(&mut *state.pending_workflow_files.lock())
 }
 #[tauri::command]
 pub fn validate_workflow(workflow: Workflow) -> Vec<ValidationIssue> {
@@ -1095,9 +1291,46 @@ pub fn list_node_contracts() -> Vec<NodeContract> {
 }
 
 #[tauri::command]
-pub fn evaluate_node_gates(workflow: Workflow, placement: Option<String>) -> std::collections::BTreeMap<String, NodeGate> {
+pub fn evaluate_node_gates(
+    workflow: Workflow,
+    placement: Option<String>,
+    state: State<'_, AppState>,
+) -> std::collections::BTreeMap<String, NodeGate> {
     let placement = placement.unwrap_or_else(|| "local".into());
-    workflow.nodes.iter().map(|node| (node.id.clone(), gate_node(node, &placement))).collect()
+    workflow
+        .nodes
+        .iter()
+        .map(|node| {
+            let mut gate = gate_node(node, &placement);
+            if gate.state == sandbox_engine::GateState::Available
+                && node.node_type == "custom_function"
+            {
+                let verified = node.customization.as_ref().is_some_and(|customization| {
+                    state
+                        .engine
+                        .database()
+                        .custom_node_verification(&workflow.id, &node.id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|receipt| {
+                            receipt.fingerprint == custom_node_fingerprint(customization)
+                        })
+                });
+                if !verified {
+                    gate = NodeGate {
+                        state: sandbox_engine::GateState::Blocked,
+                        code: "custom_unverified".into(),
+                        message: "The custom function has not passed its saved fixtures for this version.".into(),
+                        remediation: Some(
+                            "Open the ƒx editor, run every fixture, and save the verified node."
+                                .into(),
+                        ),
+                    };
+                }
+            }
+            (node.id.clone(), gate)
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]

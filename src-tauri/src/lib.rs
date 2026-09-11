@@ -34,6 +34,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_global_shortcut::ShortcutState;
 use tokio_util::sync::CancellationToken;
 
 pub struct TauriHost {
@@ -260,17 +261,39 @@ pub struct AppState {
     pub provider_adapter: Arc<provider_adapter::ProviderOperationAdapter>,
     pub sync_crypto: sync_crypto::WorkflowSyncCrypto,
     pub pending_deep_links: Arc<Mutex<Vec<String>>>,
+    pub pending_workflow_files: Arc<Mutex<Vec<String>>>,
+    pub pending_workflow_imports: Arc<Mutex<HashMap<String, Workflow>>>,
 }
 
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let files = workflow_file_arguments(&argv);
+            if let Some(state) = app.try_state::<AppState>() {
+                state.pending_workflow_files.lock().extend(files.clone());
+            }
+            if !files.is_empty() {
+                let _ = app.emit("workflow-file-requested", &files);
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
         }))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        let _ = commands::show_quick_launcher(app);
+                    }
+                })
+                .build(),
+        )
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--background"]),
+        ))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -315,6 +338,10 @@ pub fn run() {
                     .filter_map(|url| validate_deep_link(url.as_str()))
                     .collect(),
             ));
+            let startup_arguments = std::env::args().collect::<Vec<_>>();
+            let pending_workflow_files = Arc::new(Mutex::new(workflow_file_arguments(
+                &startup_arguments,
+            )));
             let sidecar_for_verify = browser_sidecar.clone();
             tauri::async_runtime::block_on(async {
                 let _ = sidecar_for_verify.verify().await;
@@ -342,7 +369,10 @@ pub fn run() {
                 provider_adapter,
                 sync_crypto,
                 pending_deep_links,
+                pending_workflow_files,
+                pending_workflow_imports: Arc::new(Mutex::new(HashMap::new())),
             };
+            commands::initialize_desktop_integration(app.handle(), &database);
             runner::create_tray(app, &state)?;
             runner::start_background_services(app.handle().clone(), &state);
             let mut events = engine.subscribe();
@@ -353,6 +383,15 @@ pub fn run() {
                 }
             });
             app.manage(state);
+            let background_launch = startup_arguments
+                .iter()
+                .any(|argument| argument == "--background");
+            let has_workflow_file = !workflow_file_arguments(&startup_arguments).is_empty();
+            if background_launch && !has_workflow_file {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
             let app_handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 let urls: Vec<String> = event
@@ -403,12 +442,20 @@ pub fn run() {
             commands::purge_workflow,
             commands::create_workflow,
             commands::export_workflow,
-            commands::import_workflow,
+            commands::inspect_workflow_import,
+            commands::inspect_workflow_path,
+            commands::confirm_workflow_import,
+            commands::cancel_workflow_import,
+            commands::take_workflow_file_requests,
             commands::validate_workflow,
             commands::list_node_contracts,
             commands::evaluate_node_gates,
             commands::test_custom_node,
             commands::get_custom_node_verification,
+            commands::open_quick_launcher,
+            commands::reveal_workflow,
+            commands::desktop_integration_settings,
+            commands::set_desktop_integration_settings,
             commands::run_workflow,
             commands::test_workflow_node,
             commands::retry_failed_node,
@@ -481,6 +528,22 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run sndbox");
+}
+
+fn workflow_file_arguments(arguments: &[String]) -> Vec<String> {
+    arguments
+        .iter()
+        .filter(|argument| {
+            let lower = argument.to_ascii_lowercase();
+            lower.ends_with(".sndbox") || lower.ends_with(".sandbox-workflow.json")
+        })
+        .filter_map(|argument| {
+            std::path::Path::new(argument)
+                .canonicalize()
+                .ok()
+                .map(|path| path.to_string_lossy().to_string())
+        })
+        .collect()
 }
 
 fn validate_deep_link(raw: &str) -> Option<String> {

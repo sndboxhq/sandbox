@@ -292,11 +292,13 @@ export function Dashboard() {
   };
   const importWorkflow = async () => {
     try {
-      const imported = await api.importWorkflow();
-      if (imported) {
-        await load();
-        await openWorkflow(imported.id);
-      }
+      const inspection = await api.inspectWorkflowImport();
+      if (inspection)
+        window.dispatchEvent(
+          new CustomEvent("sandbox:workflow-import-inspected", {
+            detail: inspection,
+          }),
+        );
     } catch (value) {
       toast.push(String(value), "error");
     }
