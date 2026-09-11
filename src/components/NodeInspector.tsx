@@ -63,6 +63,7 @@ export function NodeInspector({
   issues = [],
   onChange,
   onDelete,
+  onCustomize,
   sampleRun,
   testDataExecutions = [],
   testDataExecutionId = "",
@@ -73,6 +74,7 @@ export function NodeInspector({
   issues?: ValidationIssue[];
   onChange: (node: WorkflowNode, workflowPatch?: Partial<Workflow>) => void;
   onDelete: () => void;
+  onCustomize?: () => void;
   sampleRun?: ExecutionRecord;
   testDataExecutions?: ExecutionRecord[];
   testDataExecutionId?: string;
@@ -1562,6 +1564,7 @@ export function NodeInspector({
             }
           />
         </label>
+        {!(["note","manual_trigger","schedule_trigger","file_watch_trigger","gmail_new_email_trigger"] as string[]).includes(node.type)&&<section className="error-policy-editor"><div className="inspector-section-bar"><span>Error recovery</span><small>Never silently ignored</small></div><label className="field"><span>Terminal strategy</span><select value={node.errorPolicy?.strategy??"fail"} onChange={event=>onChange({...node,errorPolicy:{strategy:event.target.value as "fail"|"route"|"fallback",maxRetries:node.errorPolicy?.maxRetries??0,retryDelayMs:node.errorPolicy?.retryDelayMs??0,backoff:node.errorPolicy?.backoff??"fixed",fallbackOutputs:node.errorPolicy?.fallbackOutputs??{}}})}><option value="fail">Fail workflow</option><option value="route">Route structured error</option><option value="fallback">Typed fallback outputs</option></select></label><div className="field-grid"><label className="field"><span>Retries <small>0–5</small></span><input type="number" min={0} max={5} value={node.errorPolicy?.maxRetries??0} onChange={event=>onChange({...node,errorPolicy:{strategy:node.errorPolicy?.strategy??"fail",maxRetries:Number(event.target.value),retryDelayMs:node.errorPolicy?.retryDelayMs??0,backoff:node.errorPolicy?.backoff??"fixed",fallbackOutputs:node.errorPolicy?.fallbackOutputs??{}}})}/></label><label className="field"><span>Delay <small>milliseconds</small></span><input type="number" min={0} max={30000} value={node.errorPolicy?.retryDelayMs??0} onChange={event=>onChange({...node,errorPolicy:{strategy:node.errorPolicy?.strategy??"fail",maxRetries:node.errorPolicy?.maxRetries??0,retryDelayMs:Number(event.target.value),backoff:node.errorPolicy?.backoff??"fixed",fallbackOutputs:node.errorPolicy?.fallbackOutputs??{}}})}/></label></div><label className="field"><span>Backoff</span><select value={node.errorPolicy?.backoff??"fixed"} onChange={event=>onChange({...node,errorPolicy:{strategy:node.errorPolicy?.strategy??"fail",maxRetries:node.errorPolicy?.maxRetries??0,retryDelayMs:node.errorPolicy?.retryDelayMs??0,backoff:event.target.value as "fixed"|"exponential",fallbackOutputs:node.errorPolicy?.fallbackOutputs??{}}})}><option value="fixed">Fixed</option><option value="exponential">Exponential (120s cap)</option></select></label>{node.errorPolicy?.strategy==="fallback"&&<JsonField label="Fallback outputs" value={node.errorPolicy.fallbackOutputs} onChange={fallbackOutputs=>onChange({...node,errorPolicy:{...node.errorPolicy!,fallbackOutputs}})}/>} {node.errorPolicy?.strategy==="route"&&<div className="info-note">Connect exactly one reserved <code>error</code> output. Normal branches deactivate when recovery is routed.</div>}</section>}
         {locatorTest && <div className="info-note">{locatorTest}</div>}
       </div>
       <div className="inspector-footer">
@@ -1569,6 +1572,7 @@ export function NodeInspector({
           <Trash2 size={14} />
           Delete node
         </button>
+        {onCustomize&&<button className="button" onClick={onCustomize}><Code2 size={14}/>{node.type==="custom_function"?"Open ƒx editor":"Create custom version"}</button>}
       </div>
       {isCodeNode(node.type) && (
         <Suspense fallback={null}>

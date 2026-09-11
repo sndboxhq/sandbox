@@ -86,14 +86,16 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
 
 function dynamicOutputPorts(node:WorkflowNode):Array<{id:string;label:string}>|undefined{
   if(node.type==="custom_function")return [...(node.customization?.outputs.map(port=>({id:port.key,label:port.label}))??[]),...(node.customization?.branches.map(port=>({id:port.key,label:port.label}))??[]),...(node.errorPolicy?.strategy==="route"?[{id:"error",label:"Error"}]:[])];
+  const error=node.errorPolicy?.strategy==="route"?[{id:"error",label:"Error"}]:[];
   if(node.type==="switch")return [
     ...(((node.configuration.cases as Array<{id:string;name:string}>|undefined)??[]).map(item=>({id:item.id,label:item.name}))),
-    {id:String(node.configuration.fallbackBranchId??"fallback"),label:String(node.configuration.fallbackName??"Fallback")},
+    {id:String(node.configuration.fallbackBranchId??"fallback"),label:String(node.configuration.fallbackName??"Fallback")},...error,
   ];
-  if(node.type==="filter")return [{id:"output",label:"Retained"},{id:"rejected",label:"Rejected"}];
-  if(node.type==="split_out")return [{id:"output",label:"Items"},{id:"rejected",label:"Rejected"}];
-  if(node.type==="loop_over_items")return [{id:"loop",label:"Loop"},{id:"done",label:"Done"}];
-  if(node.type==="remove_duplicates")return [{id:"output",label:"Unique"},{id:"duplicates",label:"Duplicates"}];
+  if(node.type==="filter")return [{id:"output",label:"Retained"},{id:"rejected",label:"Rejected"},...error];
+  if(node.type==="split_out")return [{id:"output",label:"Items"},{id:"rejected",label:"Rejected"},...error];
+  if(node.type==="loop_over_items")return [{id:"loop",label:"Loop"},{id:"done",label:"Done"},...error];
+  if(node.type==="remove_duplicates")return [{id:"output",label:"Unique"},{id:"duplicates",label:"Duplicates"},...error];
+  if(error.length)return[{id:"output",label:"Output"},...error];
   return undefined;
 }
 

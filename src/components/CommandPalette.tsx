@@ -103,13 +103,13 @@ export function CommandPalette({
     const addNode = (type: NodeType, group: string) => {
       const node = NODE_DEFINITIONS.find((item) => item.type === type);
       if (!node) return;
-      const disabled = hasTrigger && isTrigger(type);
+      const disabled = (hasTrigger && isTrigger(type)) || type === "custom_function";
       all.push({
         id: `node-${type}`,
         group,
         name: node.name,
         description: disabled
-          ? "A workflow already has a trigger. Remove or replace it first."
+          ? type === "custom_function" ? "Create a custom version from a supported pure node so provenance and verification remain intact." : "A workflow already has a trigger. Remove or replace it first."
           : node.description,
         category: node.group,
         disabled,

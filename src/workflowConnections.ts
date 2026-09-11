@@ -1,5 +1,5 @@
 import type { Connection } from "@xyflow/react";
-import { isAnnotation, isTrigger } from "./catalogue";
+import { definitionFor, isAnnotation, isTrigger } from "./catalogue";
 import type { Workflow, WorkflowEdge, WorkflowNode } from "./types";
 
 export const WEB_BUILDER_INPUT_PORTS = [
@@ -66,10 +66,20 @@ export function isValidWorkflowConnection(
   );
   if (duplicate) return false;
 
+  if(sourceHandle==="error"&&source.errorPolicy?.strategy!=="route")return false;
+  const sourcePorts=source.type==="custom_function"?[...(source.customization?.outputs??[]),...(source.customization?.branches??[])]:definitionFor(source.type).outputs;
+  const targetPorts=target.type==="custom_function"?(target.customization?.inputs??[]):definitionFor(target.type).inputs;
+  const sourcePort=sourcePorts.find(port=>port.key===sourceHandle);
+  const targetPort=targetPorts.find(port=>port.key===targetHandle);
+  if(source.type==="custom_function"&&sourceHandle!=="error"&&!sourcePort)return false;
+  if(target.type==="custom_function"&&!targetPort)return false;
+  if(sourcePort&&targetPort&&sourcePort.type!=="any"&&targetPort.type!=="any"&&sourcePort.type!==targetPort.type)return false;
+
   if(target.type === "merge"){
     const ports=((target.configuration.inputPorts as Array<{id:string}>|undefined)??[]).map(port=>port.id);
     return ports.includes(targetHandle)&&!workflow.edges.some(edge=>edge.targetNodeId===target.id&&(edge.targetPort??edge.targetHandle)===targetHandle);
   }
+  if (target.type === "custom_function") return !workflow.edges.some(edge=>edge.targetNodeId===target.id&&(edge.targetPort??edge.targetHandle)===targetHandle);
   if (target.type !== "web_builder") return targetHandle === "input";
   if (!isWebBuilderInput(targetHandle) || source.type !== "code") return false;
 
@@ -94,7 +104,7 @@ export function connectWorkflowNodes(
   const targetHandle = connection.targetHandle ?? "input";
   const target=workflow.nodes.find(node=>node.id===targetId);
   const webBuilderInput = isWebBuilderInput(targetHandle)&&target?.type==="web_builder";
-  const mergeInput=target?.type==="merge";
+  const mergeInput=target?.type==="merge"||target?.type==="custom_function";
   const edge: WorkflowEdge = {
     id: `edge_${crypto.randomUUID().slice(0, 8)}`,
     sourceNodeId: sourceId,

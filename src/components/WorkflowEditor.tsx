@@ -183,10 +183,12 @@ function workflowNodeHandles(node: WorkflowNode): Node<WorkflowNodeData>["handle
 
 function workflowOutputHandles(node:WorkflowNode):string[]{
   if(node.type==="custom_function")return [...(node.customization?.outputs.map(port=>port.key)??[]),...(node.customization?.branches.map(port=>port.key)??[]),...(node.errorPolicy?.strategy==="route"?["error"]:[])];
-  if(node.type==="switch")return [...(((node.configuration.cases as Array<{id:string}>|undefined)??[]).map(item=>item.id)),String(node.configuration.fallbackBranchId??"fallback")];
-  if(node.type==="filter"||node.type==="split_out")return ["output","rejected"];
-  if(node.type==="loop_over_items")return ["loop","done"];
-  if(node.type==="remove_duplicates")return ["output","duplicates"];
+  const error=node.errorPolicy?.strategy==="route"?["error"]:[];
+  if(node.type==="switch")return [...(((node.configuration.cases as Array<{id:string}>|undefined)??[]).map(item=>item.id)),String(node.configuration.fallbackBranchId??"fallback"),...error];
+  if(node.type==="filter"||node.type==="split_out")return ["output","rejected",...error];
+  if(node.type==="loop_over_items")return ["loop","done",...error];
+  if(node.type==="remove_duplicates")return ["output","duplicates",...error];
+  if(error.length)return["output","error"];
   return [];
 }
 
@@ -555,9 +557,9 @@ export function WorkflowEditor() {
   useEffect(() => {
     const request = ++validationRequest.current;
     const timer = window.setTimeout(() => {
-      void api
-        .validateWorkflow(workflow)
-        .then((result) => {
+      void Promise.all([api.validateWorkflow(workflow),api.evaluateNodeGates(workflow,"local")])
+        .then(([validation,gates]) => {
+          const result=[...validation,...Object.entries(gates).filter(([,gate])=>gate.state!=="available"&&gate.code!=="node_disabled").map(([nodeId,gate])=>({code:gate.code,message:gate.message,severity:(gate.state==="blocked"?"error":"warning") as ValidationIssue["severity"],nodeId,suggestion:gate.remediation}))];
           if (request === validationRequest.current)
             setIssues((current) => [
               ...current.filter((issue) => issue.code === "save_failed"),
@@ -1071,7 +1073,7 @@ export function WorkflowEditor() {
   };
   if(customDraft)return <>
     <CustomNodeEditor workflow={workflow} node={customDraft.node} source={customDraft.source} onChange={node=>setCustomDraft(current=>current?{...current,node}:current)} onSave={()=>{const next=customDraft.isNew?{...workflow,nodes:[...workflow.nodes,customDraft.node]}:{...workflow,nodes:workflow.nodes.map(node=>node.id===customDraft.node.id?customDraft.node:node)};commit(next);setSelectedNodeId(customDraft.node.id);setCustomDraft(undefined);toast.push("Custom ƒx draft saved to the workflow. Verify its fixtures before running.","success")}} onBack={()=>{if(JSON.stringify(customDraft.node)!==customDraft.initial)setCustomLeaveOpen(true);else setCustomDraft(undefined)}} onAi={()=>{setAiChatContext({key:`custom:${customDraft.node.id}`,label:`Custom function: ${customDraft.node.name}`,prompt:`Help improve the ${customDraft.node.customization?.language} custom function and its declared sndbox input, output, and branch contract. It must return { outputs, branches? } and cannot use ambient host capabilities.`});setAiChatOpen(true)}}/>
-    <ConfirmDialog open={customLeaveOpen} onOpenChange={setCustomLeaveOpen} title="Discard custom function changes?" description="Code, contract, and fixture edits in this full-page draft have not been saved to the workflow." confirmLabel="Discard changes" destructive onConfirm={()=>{setCustomLeaveOpen(false);setCustomDraft(undefined)}}/>
+    <ConfirmDialog open={customLeaveOpen} onOpenChange={setCustomLeaveOpen} title="Discard custom function changes?" description="Code, contract, and fixture edits in this full-page draft have not been saved to the workflow." confirmLabel="Discard changes" dangerous onConfirm={()=>{setCustomLeaveOpen(false);setCustomDraft(undefined)}}/>
   </>;
   return (
     <main
@@ -1409,6 +1411,7 @@ export function WorkflowEditor() {
                 commit(next);
               }}
               onDelete={() => removeNode(selectedNode.id)}
+              onCustomize={selectedNode.type==="custom_function"||CUSTOMIZABLE_SOURCES.has(selectedNode.type)?()=>void openCustomEditor(selectedNode.id):undefined}
             /></Suspense>
           </>
         )}

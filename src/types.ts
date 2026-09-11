@@ -20,7 +20,7 @@ export interface NodePortDefinition { key:string; label:string; type:ValueType; 
 export interface CustomNodeTest { id:string; name:string; inputs:Record<string,unknown>; items:WorkflowItem[]; expectedOutputs:Record<string,unknown>; expectedBranches:Record<string,unknown>; expectedError?:string }
 export interface NodeCustomization { sourceType:string; sourceVersion:number; sourceName:string; sourceContractHash:string; language:"javascript"|"python"; sourceCode:string; description:string; inputs:NodePortDefinition[]; outputs:NodePortDefinition[]; branches:NodePortDefinition[]; tests:CustomNodeTest[]; runtimeRequirement:string }
 export type ErrorStrategy="fail"|"route"|"fallback";
-export interface NodeErrorPolicy { strategy:ErrorStrategy; maxRetries:number; retryDelayMs:number; backoff:"fixed"|"exponential"; fallbackOutputs:Record<string,unknown> }
+export interface NodeErrorPolicy { strategy:ErrorStrategy; maxRetries:number; retryDelayMs:number; backoff:"fixed"|"exponential"; fallbackOutputs:unknown }
 export type InputBinding=
   | {kind:"literal";value:unknown}
   | {kind:"node_output";nodeId:string;path?:string[]}
