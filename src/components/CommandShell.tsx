@@ -39,7 +39,9 @@ export function CommandShell({ open, onOpenChange, onShortcuts, onLauncher }: {
   const completions = useMemo(() => completeCommand(input), [input]);
 
   useEffect(() => { if (open) window.setTimeout(() => inputRef.current?.focus(), 0); }, [open]);
-  useEffect(() => endRef.current?.scrollIntoView({ block: "nearest" }), [entries, pending]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "nearest" });
+  }, [entries, pending]);
   useEffect(() => {
     const listener = () => {
       onOpenChange(true);

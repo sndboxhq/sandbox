@@ -23,6 +23,7 @@ import { usePreferences } from "../preferences";
 import { useAppStore, type View } from "../store";
 import type { RunnerStatus } from "../types";
 import { DesktopUpdateNotice } from "./DesktopUpdateNotice";
+import { LatestNewsButton } from "./LatestNewsButton";
 import { ConfirmDialog } from "./ui/Dialog";
 import { Tooltip } from "./ui/Tooltip";
 import { useToast } from "./ui/Toast";
@@ -260,6 +261,7 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
           <Bug size={16} />
           {!collapsed && <span>Report a bug</span>}
         </button>
+        <LatestNewsButton collapsed={collapsed} />
         <button aria-label="Open commands" onClick={onCommand}>
           <Command size={16} />
           {!collapsed && (
