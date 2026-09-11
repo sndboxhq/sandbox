@@ -10,7 +10,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { parse } from "acorn";
 import { api } from "../api";
 import type {
@@ -28,6 +28,9 @@ const valueTypes: ValueType[] = [
   "any", "string", "number", "boolean", "object", "array", "path", "connection",
 ];
 type PortKind = "inputs" | "outputs" | "branches";
+const defaultCodeFontSize = 12;
+const minimumCodeFontSize = 9;
+const maximumCodeFontSize = 48;
 
 export function CustomNodeEditor({ workflow, node, source, onChange, onSave, onBack, onAi }: {
   workflow: Workflow;
@@ -46,12 +49,29 @@ export function CustomNodeEditor({ workflow, node, source, onChange, onSave, onB
   const [receipt, setReceipt] = useState<CustomNodeVerification>();
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState<string>();
+  const [codeFontSize, setCodeFontSize] = useState(defaultCodeFontSize);
+  const codeGridRef = useRef<HTMLDivElement>(null);
   const problems = useMemo(() => diagnostics(custom.language, custom.sourceCode), [custom.language, custom.sourceCode]);
   const verified = Boolean(report?.passed || receipt);
 
   useEffect(() => {
     void api.getCustomNodeVerification(workflow.id, node.id).then(setReceipt).catch(() => setReceipt(undefined));
   }, [workflow.id, node.id]);
+
+  useEffect(() => {
+    const codeGrid = codeGridRef.current;
+    if (tab !== "code" || !codeGrid) return;
+    const zoomCode = (event: WheelEvent) => {
+      if ((!event.ctrlKey && !event.metaKey) || event.deltaY === 0) return;
+      event.preventDefault();
+      setCodeFontSize((current) => Math.min(
+        maximumCodeFontSize,
+        Math.max(minimumCodeFontSize, current + (event.deltaY < 0 ? 1 : -1)),
+      ));
+    };
+    codeGrid.addEventListener("wheel", zoomCode, { passive: false });
+    return () => codeGrid.removeEventListener("wheel", zoomCode);
+  }, [tab]);
 
   const patch = (value: Partial<NodeCustomization>) => {
     setReport(undefined);
@@ -117,9 +137,21 @@ export function CustomNodeEditor({ workflow, node, source, onChange, onSave, onB
         <label><Search size={12} /><input value={find} onChange={(event) => setFind(event.target.value)} placeholder="Find" /></label>
         <input value={replace} onChange={(event) => setReplace(event.target.value)} placeholder="Replace" />
         <button disabled={!find} onClick={() => patch({ sourceCode: custom.sourceCode.replaceAll(find, replace) })}>Replace all</button>
-        <span>{custom.runtimeRequirement}</span>
+        <span className="fx-code-runtime">{custom.runtimeRequirement}</span>
+        <span
+          className="fx-code-zoom"
+          role="status"
+          aria-label={`Code zoom ${Math.round((codeFontSize / defaultCodeFontSize) * 100)}%`}
+          title="Ctrl + scroll to zoom code"
+        >
+          {Math.round((codeFontSize / defaultCodeFontSize) * 100)}%
+        </span>
       </div>
-      <div className="fx-code-grid">
+      <div
+        className="fx-code-grid"
+        ref={codeGridRef}
+        style={{ "--fx-code-font-size": `${codeFontSize}px` } as CSSProperties}
+      >
         <pre aria-hidden="true">{custom.sourceCode.split("\n").map((_, index) => index + 1).join("\n")}</pre>
         <textarea spellCheck={false} aria-label="Custom function source" value={custom.sourceCode} onChange={(event) => patch({ sourceCode: event.target.value })} />
       </div>
