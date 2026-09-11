@@ -20,6 +20,7 @@ const footerGroups = [
       { label: "Solutions", href: "/solutions" },
       { label: "Marketplace", href: "/marketplace" },
       { label: "Pricing", href: "/pricing" },
+      { label: "Latest news", href: "/news" },
       { label: "Changelog", href: "/changelog" },
       { label: "Discord community", href: brand.community.discord, external: true },
     ],

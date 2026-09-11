@@ -12,6 +12,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/marketplace",
     "/pricing",
     "/downloads",
+    "/news",
     "/changelog",
     "/security",
     "/enterprise",
