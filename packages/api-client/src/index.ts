@@ -1,5 +1,5 @@
-import type { WorkspaceActivitySummary } from "@sandbox/contracts";
-export type { WorkspaceActivitySummary } from "@sandbox/contracts";
+import type { Invitation, WorkspaceActivitySummary } from "@sandbox/contracts";
+export type { Invitation, WorkspaceActivitySummary } from "@sandbox/contracts";
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type QueryValue = string | number | boolean | null | undefined;
@@ -120,6 +120,10 @@ export interface AccountOrganisation { id:string;name:string;slug:string;role:Bu
 export interface AccountProfile {accountId:string;email:string;displayName:string;sessionId:string}
 export interface AccountSession {id:string;deviceName:string;createdAt:string;lastSeenAt:string;expiresAt:string;current:boolean}
 export interface WorkspaceMember {accountId:string;email:string;displayName:string;role:BuiltInRole;joinedAt:string}
+export interface WorkspaceInvitationResult {
+  invitation: Invitation;
+  delivery: { status: "sent" } | { status: "manual"; invitationUrl: string };
+}
 export interface WorkspaceEnvironment {environmentId:string;environment:"development"|"staging"|"production"}
 export type UsageMeter="hosted_runner_seconds"|"managed_browser_seconds"|"network_egress_bytes"|"artifact_storage_byte_seconds";
 export type UsageUnit="seconds"|"bytes"|"byte_seconds";
@@ -317,6 +321,10 @@ export class SandboxApiClient {
 
   listWorkspaceMembers<T = {items:WorkspaceMember[]}>(workspaceId:string,parse?: (value:unknown)=>T):Promise<ApiResult<T>> {
     return this.request({path:`/v1/workspaces/${encodeURIComponent(workspaceId)}/members`,parse});
+  }
+
+  createWorkspaceInvitation<T = WorkspaceInvitationResult>(workspaceId:string,input:{email:string;role:BuiltInRole;workspaceIds:string[];expiresInHours?:number},parse?: (value:unknown)=>T):Promise<ApiResult<T>> {
+    return this.request({method:"POST",path:`/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`,body:input,parse});
   }
 
   listWorkspaceRunners<T = {items:unknown[]}>(workspaceId:string,parse?: (value:unknown)=>T):Promise<ApiResult<T>> {

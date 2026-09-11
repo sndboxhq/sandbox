@@ -51,9 +51,14 @@ export async function inviteMemberAction(_state: PortalActionResult, formData: F
   try {
     const api = await client();
     const workspaceId = field(formData, "workspaceId");
-    await api.request({ method: "POST", path: `/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`, body: { email: field(formData, "email"), role: field(formData, "role"), workspaceIds: [workspaceId], expiresInHours: 72 } });
+    const email = field(formData, "email").toLowerCase();
+    const role = field(formData, "role");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { status: "error", message: "Enter a valid email address.", fieldErrors: { email: "Enter a valid email address." } };
+    if (!["administrator", "developer", "operator", "viewer"].includes(role)) return { status: "error", message: "Choose an available workspace role.", fieldErrors: { role: "Choose an available workspace role." } };
+    const response = await api.createWorkspaceInvitation(workspaceId, { email, role: role as "administrator" | "developer" | "operator" | "viewer", workspaceIds: [workspaceId], expiresInHours: 72 });
     revalidatePath("/organisations");
-    return { status: "success", message: "Workspace invitation sent." };
+    if (response.data.delivery.status === "manual") return { status: "success", message: `Invitation created for ${email}. Copy the secure link below and share it directly.`, copyValue: response.data.delivery.invitationUrl, copyLabel: "Copy invitation link" };
+    return { status: "success", message: `Invitation sent to ${email}.` };
   } catch (error) { return actionError(error, "The invitation could not be sent."); }
 }
 

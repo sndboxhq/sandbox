@@ -531,7 +531,7 @@ export function NodeInspector({
           <Field label="Manual test data source" hint="Pinned data is used when no execution is selected">
             <CustomSelect value={testDataExecutionId} onChange={event=>onTestDataExecutionChange?.(event.target.value)}>
               <option value="">Pinned input / empty collection</option>
-              {testDataExecutions.map(execution=><option key={execution.id} value={execution.id}>{new Date(execution.startedAt).toLocaleString()} Â· {execution.status} Â· {execution.id.slice(0,8)}</option>)}
+              {testDataExecutions.map(execution=><option key={execution.id} value={execution.id}>{new Date(execution.startedAt).toLocaleString()} · {execution.status} · {execution.id.slice(0,8)}</option>)}
             </CustomSelect>
           </Field>
           <JsonField label={node.type==="merge"?"Pinned named inputs":"Pinned sample collection"} value={config.pinnedData??(node.type==="merge"?{}:[])} onChange={value=>set("pinnedData",value)}/>

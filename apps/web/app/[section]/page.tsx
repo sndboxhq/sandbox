@@ -36,6 +36,7 @@ import {
   Server,
   ShieldCheck,
   Trash2,
+  UserPlus,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -87,7 +88,7 @@ const staticSections: Record<
     title: "Releases",
     description: "Review release notes and update policy before installing.",
     items: [
-      `sndbox ${launchRelease.version} · ${launchRelease.channel}`,
+      `sndbox v${launchRelease.version.replace(/^v/, "")} · ${launchRelease.channel}`,
       launchRelease.summary,
       "Signed desktop, Linux agent and OCI-image pipeline",
     ],
@@ -371,7 +372,7 @@ async function OrganisationsPage({
               ))}
               {!members.length && <EmptyRow text="No members were returned." />}
             </div>
-            <PortalActionForm action={inviteMemberAction} hidden={{ workspaceId }} className="portal-form compact" submitLabel="Invite member" pendingLabel="Sending…">
+            <PortalActionForm action={inviteMemberAction} hidden={{ workspaceId }} className="portal-form compact invite-member-form" submitLabel="Invite member" pendingLabel="Creating invite…" submitClassName="invite-member-submit" submitIcon={<UserPlus aria-hidden="true" />} resetOnSuccess>
               <label>
                 Email
                 <input type="email" name="email" required />
@@ -657,7 +658,7 @@ async function OrganisationsPage({
                               : `expires ${new Date(token.expiresAt).toLocaleDateString("en-GB")}`}
                           </small>
                         </div>
-                        {!token.revokedAt && <PortalActionForm action={revokeScimTokenAction} hidden={{ organisationId: organisation.id, tokenId: token.id }} submitLabel="Revoke" pendingLabel="Revokingâ€¦" dangerous confirmTitle={`Revoke ${token.name}?`} confirmDescription="Automated provisioning clients using this credential will lose access immediately." />}
+                        {!token.revokedAt && <PortalActionForm action={revokeScimTokenAction} hidden={{ organisationId: organisation.id, tokenId: token.id }} submitLabel="Revoke" pendingLabel="Revoking…" dangerous confirmTitle={`Revoke ${token.name}?`} confirmDescription="Automated provisioning clients using this credential will lose access immediately." />}
                       </article>
                     ))}
                     {!scim.length && <EmptyRow text="No SCIM credentials." />}
@@ -777,16 +778,16 @@ async function UsagePage({
 }
 
 function UsageChart({usage}:{usage:WorkspaceUsageSummary|null}) {
-  const daily=usage?.daily ?? emptyUsageDays(30);
+  const daily=usage?.daily.length ? usage.daily : emptyUsageDays(30);
   const compute=daily.map((point)=>point.quantities.hosted_runner_seconds+point.quantities.managed_browser_seconds);
-  const peak=Math.max(1,...compute),total=compute.reduce((sum,quantity)=>sum+quantity,0),activeDays=compute.filter(Boolean).length;
+  const peak=Math.max(0,...compute),scalePeak=Math.max(1,peak),total=compute.reduce((sum,quantity)=>sum+quantity,0),activeDays=compute.filter(Boolean).length;
   const browserTotal=daily.reduce((sum,point)=>sum+point.quantities.managed_browser_seconds,0);
   const ticks=[0,7,14,21,daily.length-1].filter((index,position,items)=>index>=0&&index<daily.length&&items.indexOf(index)===position);
   return (
     <figure className="usage-chart" aria-label="Daily hosted compute usage">
       <div className="usage-chart-key"><span className="runner-key">Hosted runner</span><span className="browser-key">Managed browser</span><i>unit: time</i></div>
       <div className="usage-chart-body">
-        <div className="usage-y-axis" aria-hidden="true"><span>{formatDurationAxis(peak)}</span><span>{formatDurationAxis(peak/2)}</span><span>0</span></div>
+        <div className="usage-y-axis" aria-hidden="true"><span>{formatDurationAxis(scalePeak)}</span><span>{formatDurationAxis(scalePeak/2)}</span><span>0</span></div>
         <div className="usage-plot">
           <div className="usage-grid-lines" aria-hidden="true"><i /><i /><i /></div>
           <div className="usage-bars">
@@ -794,7 +795,7 @@ function UsageChart({usage}:{usage:WorkspaceUsageSummary|null}) {
               const runner=point.quantities.hosted_runner_seconds,browser=point.quantities.managed_browser_seconds,dayTotal=runner+browser;
               const description=`${formatUsageDateLong(point.date)}: ${formatDuration(dayTotal)} total — ${formatDuration(runner)} runner, ${formatDuration(browser)} browser`;
               return <div className="usage-day" key={point.date} role="img" aria-label={description} title={description}>
-                <div className="usage-stack" style={{height:barHeight(dayTotal,peak)}}>
+                <div className="usage-stack" style={{height:barHeight(dayTotal,scalePeak)}}>
                   <span className="usage-segment runner" style={{height:segmentHeight(runner,dayTotal)}} />
                   <span className="usage-segment browser" style={{height:segmentHeight(browser,dayTotal)}} />
                 </div>
@@ -1160,7 +1161,7 @@ function DeploymentPanel({
                   {String(deployment.environment)} · {status}
                 </small>
               </div>
-              {nextStatus && <PortalActionForm action={transitionDeploymentAction} hidden={{ workspaceId, deploymentId, status: nextStatus, reason: `${nextStatus === "paused" ? "Paused" : "Resumed"} from the account portal` }} submitLabel={nextStatus === "paused" ? "Pause" : "Resume"} pendingLabel="Updatingâ€¦" confirmTitle={`${nextStatus === "paused" ? "Pause" : "Resume"} this deployment?`} confirmDescription={nextStatus === "paused" ? "New hosted executions will stop until the deployment is resumed." : "Hosted executions can start again as soon as the deployment is active."} />}
+              {nextStatus && <PortalActionForm action={transitionDeploymentAction} hidden={{ workspaceId, deploymentId, status: nextStatus, reason: `${nextStatus === "paused" ? "Paused" : "Resumed"} from the account portal` }} submitLabel={nextStatus === "paused" ? "Pause" : "Resume"} pendingLabel="Updating…" confirmTitle={`${nextStatus === "paused" ? "Pause" : "Resume"} this deployment?`} confirmDescription={nextStatus === "paused" ? "New hosted executions will stop until the deployment is resumed." : "Hosted executions can start again as soon as the deployment is active."} />}
             </article>
           );
         })}

@@ -17,7 +17,7 @@ export default function Page() {
       </header>
       <article className="release">
         <aside>
-          <strong>{launchRelease.version}</strong>
+          <strong>v{launchRelease.version.replace(/^v/, "")}</strong>
           <span>{launchRelease.channel}</span>
           <span>{launchRelease.date}</span>
         </aside>

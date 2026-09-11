@@ -106,6 +106,32 @@ input[type="checkbox"] {
 .drawer-handle {
   background-color: var(--surface-sidebar);
 }
+.brand > span:last-child {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.brand small {
+  font-size: 9px;
+  letter-spacing: -.015em;
+}
+.sidebar {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 52%, transparent) transparent;
+}
+.sidebar::-webkit-scrollbar { width: 8px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 52%, transparent);
+  background-clip: padding-box;
+}
+.sidebar::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--text-secondary) 72%, transparent); }
 .react-flow {
   background: var(--surface-canvas);
 }

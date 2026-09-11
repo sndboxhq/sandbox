@@ -571,7 +571,7 @@ export function SettingsView() {
               </SelectPreference>
               <div className="settings-release-card">
                 <span>Installed version</span>
-                <strong>sndbox {packageMetadata.version}</strong>
+                <strong>sndbox v{packageMetadata.version.replace(/^v/, "")}</strong>
                 <small>
                   Desktop installers and Linux runners are verified against the
                   same immutable release tag.
@@ -583,7 +583,7 @@ export function SettingsView() {
                   </button>
                   {updateCheck && <small role={updateCheck.status === "error" ? "alert" : "status"}>
                     {updateCheck.status === "available"
-                      ? `sndbox ${updateCheck.update.version} is available. The download action is shown in the sidebar.`
+                      ? `sndbox v${updateCheck.update.version.replace(/^v/, "")} is available. The download action is shown in the sidebar.`
                       : updateCheck.status === "current"
                         ? `No newer ${preferences.updateChannel} release is available. Installed: ${updateCheck.currentVersion}${updateCheck.latestVersion ? `; latest published: ${updateCheck.latestVersion}` : ""}.`
                         : updateCheck.message}

@@ -92,4 +92,14 @@ describe("SandboxApiClient v1 compatibility",()=>{
     expect(result.data).toEqual(payload);
     expect(String(fetch.mock.calls[0][0])).toBe("https://api.sandbox.test/v1/workspaces/workspace%2Fid/activity?limit=25");
   });
+
+  it("creates a typed workspace invitation with automatic delivery fallback data", async () => {
+    const payload = { invitation: { id: "invite-1", organisationId: "org-1", workspaceIds: ["workspace/id"], email: "developer@example.com", role: "developer", expiresAt: "2026-09-14T10:15:00.000Z", status: "pending" }, delivery: { status: "manual", invitationUrl: "https://app.sandbox.test/invitations/accept?token=secret" } };
+    const fetch = vi.fn(async () => json(payload));
+    const client = new SandboxApiClient({ baseUrl: "https://api.sandbox.test", fetch });
+    const result = await client.createWorkspaceInvitation("workspace/id", { email: "developer@example.com", role: "developer", workspaceIds: ["workspace/id"], expiresInHours: 72 });
+    expect(result.data.delivery).toEqual(payload.delivery);
+    expect(String(fetch.mock.calls[0][0])).toBe("https://api.sandbox.test/v1/workspaces/workspace%2Fid/invitations");
+    expect(fetch.mock.calls[0][1]?.method).toBe("POST");
+  });
 });

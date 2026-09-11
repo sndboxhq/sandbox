@@ -290,8 +290,24 @@ describe("control-plane API", () => {
       payload: { email: "developer@example.com", role: "developer", workspaceIds: [workspaceId], expiresInHours: 24 }
     });
     expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().delivery).toEqual({ status: "sent" });
     expect(response.body).not.toContain("token=");
     expect(deps.email.sendInvitation).toHaveBeenCalledWith(expect.objectContaining({ recipient: "developer@example.com", invitationUrl: expect.stringContaining("token=") }));
+    await server.close();
+  });
+
+  it("returns a secure manual invitation link when email delivery is unavailable", async () => {
+    const deps = dependencies(["members.manage"]);
+    vi.mocked(deps.email.sendInvitation).mockRejectedValueOnce(new Error("provider unavailable"));
+    const server = await createServer(deps);
+    const response = await server.inject({
+      method: "POST", url: `/v1/workspaces/${workspaceId}/invitations`,
+      headers: { authorization: "Bearer token", "x-sandbox-request-time": new Date().toISOString() },
+      payload: { email: "developer@example.com", role: "developer", workspaceIds: [workspaceId], expiresInHours: 24 }
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({ delivery: { status: "manual", invitationUrl: expect.stringMatching(/^https:\/\/app\.sandbox\.test\/invitations\/accept\?token=.+/) } });
+    expect(response.json().delivery.invitationUrl).not.toContain("provider unavailable");
     await server.close();
   });
 

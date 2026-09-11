@@ -751,13 +751,19 @@ export async function createServer(dependencies: ApiDependencies): Promise<Fasti
       expiresAt,
       tokenHash: createHash("sha256").update(token, "utf8").digest()
     }, request.id);
-    await dependencies.email.sendInvitation({
-      recipient: input.email,
-      organisationName: invitation.organisationId,
-      invitationUrl: `${dependencies.webBaseUrl.replace(/\/$/, "")}/invitations/accept?token=${encodeURIComponent(token)}`,
-      expiresAt
-    });
-    return { invitation };
+    const invitationUrl = `${dependencies.webBaseUrl.replace(/\/$/, "")}/invitations/accept?token=${encodeURIComponent(token)}`;
+    try {
+      await dependencies.email.sendInvitation({
+        recipient: input.email,
+        organisationName: invitation.organisationId,
+        invitationUrl,
+        expiresAt
+      });
+      return { invitation, delivery: { status: "sent" as const } };
+    } catch (error) {
+      request.log.warn({ err: error, invitationId: invitation.id }, "invitation email unavailable; returning a manual delivery link");
+      return { invitation, delivery: { status: "manual" as const, invitationUrl } };
+    }
   });
 
   app.post("/v1/invitations/accept", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async request => {
