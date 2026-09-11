@@ -13,10 +13,14 @@ import type {
   CloudWorkflow,
   CloudWorkflowApproval,
   CloudPublishResult,
+  CollaborationOperationPage,
+  CollaborationSessionHandle,
   ConnectionMetadata,
   CustomNodeTestReport,
   CustomNodeVerification,
   DesktopIntegrationSettings,
+  DecryptedCollaborationOperation,
+  DecryptedCollaborationPresence,
   ExecutionPage,
   ExecutionQuery,
   ExecutionRecord,
@@ -35,11 +39,12 @@ import type {
   ValidationIssue,
   Workflow,
   WorkflowImportInspection,
+  WorkflowCollaborationOperation,
+  WorkflowCollaborationPresenceState,
   WorkflowMetadataPatch,
   WorkflowRevisionSummary,
   WorkflowSummary,
 } from "./types";
-import nodeContractSnapshot from "./generated/node-contracts.json";
 import { previewApi } from "./previewApi";
 const tauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 export const api = {
@@ -56,6 +61,10 @@ export const api = {
   saveWorkflow: (workflow: Workflow) =>
     tauri
       ? invoke<Workflow>("save_workflow", { workflow })
+      : previewApi.saveWorkflow(workflow),
+  saveCollaborationBootstrap: (workflow:Workflow) =>
+    tauri
+      ? invoke<Workflow>("save_collaboration_bootstrap",{workflow})
       : previewApi.saveWorkflow(workflow),
   listWorkflowRevisions: (workflowId: string) =>
     tauri
@@ -157,8 +166,8 @@ export const api = {
     tauri
       ? invoke<ValidationIssue[]>("validate_workflow", { workflow })
       : previewApi.validateWorkflow(workflow),
-  listNodeContracts: () => tauri ? invoke<NodeContract[]>("list_node_contracts") : Promise.resolve(nodeContractSnapshot as unknown as NodeContract[]),
-  evaluateNodeGates: (workflow: Workflow, placement = "local") => tauri ? invoke<Record<string,NodeGate>>("evaluate_node_gates", { workflow, placement }) : Promise.resolve({}),
+  listNodeContracts: () => tauri ? invoke<NodeContract[]>("list_node_contracts") : import("./generated/node-contracts.json").then(module=>module.default as unknown as NodeContract[]),
+  evaluateNodeGates: (workflow: Workflow, placement = "local"):Promise<Record<string,NodeGate>> => tauri ? invoke<Record<string,NodeGate>>("evaluate_node_gates", { workflow, placement }) : Promise.resolve({}),
   testCustomNode: (workflow: Workflow, nodeId: string) => tauri ? invoke<CustomNodeTestReport>("test_custom_node", { workflow, nodeId }) : Promise.reject(new Error("Custom node verification requires the desktop runtime.")),
   getCustomNodeVerification: (workflowId:string,nodeId:string) => tauri ? invoke<CustomNodeVerification|undefined>("get_custom_node_verification",{workflowId,nodeId}) : Promise.resolve(undefined),
   runWorkflow: (id: string) =>
@@ -438,6 +447,50 @@ export const api = {
     tauri
       ? invoke<WorkspaceActivitySummary>("get_workspace_activity", { workspaceId })
       : Promise.resolve<WorkspaceActivitySummary>({ generatedAt: new Date().toISOString(), runners: [], runs: [], pendingApprovalCount: 0, webhookFailureCount: 0, syncConflictCount: 0 }),
+  prepareWorkflowCollaborationSnapshot: (workflowId:string) =>
+    tauri
+      ? invoke<Workflow>("prepare_workflow_collaboration_snapshot",{id:workflowId})
+      : Promise.reject(new Error("Safe collaboration snapshots require the desktop application.")),
+  startWorkflowCollaboration: (workspaceId:string,workflowId:string,deviceId:string,color:string) =>
+    tauri
+      ? invoke<CollaborationSessionHandle>("start_workflow_collaboration",{workspaceId,workflowId,deviceId,color})
+      : Promise.reject(new Error("Live collaboration requires the signed-in desktop application.")),
+  joinWorkflowCollaboration: (inviteCode:string,deviceId:string,color:string) =>
+    tauri
+      ? invoke<CollaborationSessionHandle>("join_workflow_collaboration",{inviteCode,deviceId,color})
+      : Promise.reject(new Error("Live collaboration requires the signed-in desktop application.")),
+  appendWorkflowCollaborationOperation: (handle:CollaborationSessionHandle,operation:WorkflowCollaborationOperation,clientSequence:number) =>
+    tauri
+      ? invoke<DecryptedCollaborationOperation>("append_workflow_collaboration_operation",{
+          workspaceId:handle.session.workspaceId,workflowId:handle.session.workflowId,sessionId:handle.session.sessionId,
+          baseSequence:operation.baseSequence,clientSequence,operation,
+        })
+      : Promise.reject(new Error("Live collaboration requires the signed-in desktop application.")),
+  pollWorkflowCollaborationOperations: (handle:CollaborationSessionHandle,after:number) =>
+    tauri
+      ? invoke<CollaborationOperationPage>("poll_workflow_collaboration_operations",{
+          workspaceId:handle.session.workspaceId,workflowId:handle.session.workflowId,sessionId:handle.session.sessionId,after,
+        })
+      : Promise.resolve({items:[],latestSequence:after}),
+  updateWorkflowCollaborationPresence: (handle:CollaborationSessionHandle,deviceId:string,color:string,presence:WorkflowCollaborationPresenceState) =>
+    tauri
+      ? invoke<void>("update_workflow_collaboration_presence",{
+          workspaceId:handle.session.workspaceId,workflowId:handle.session.workflowId,sessionId:handle.session.sessionId,
+          deviceId,color,presence,
+        })
+      : Promise.resolve(),
+  listWorkflowCollaborationPresence: (handle:CollaborationSessionHandle) =>
+    tauri
+      ? invoke<DecryptedCollaborationPresence[]>("list_workflow_collaboration_presence",{
+          workspaceId:handle.session.workspaceId,workflowId:handle.session.workflowId,sessionId:handle.session.sessionId,
+        })
+      : Promise.resolve([]),
+  leaveWorkflowCollaboration: (handle:CollaborationSessionHandle,deviceId:string) =>
+    tauri
+      ? invoke<void>("leave_workflow_collaboration",{
+          workspaceId:handle.session.workspaceId,workflowId:handle.session.workflowId,sessionId:handle.session.sessionId,deviceId,
+        })
+      : Promise.resolve(),
   pushCloudWorkflow: (
     workflowId: string,
     workspaceId: string,

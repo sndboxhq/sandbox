@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyCollaborationOperation, diffCollaborativeWorkflow } from "./collaboration";
+import { applyCollaborationOperation, diffCollaborativeWorkflow, parseCollaborationOperation, snapshotCollaborativeWorkflow } from "./collaboration";
 import type { Workflow } from "./types";
 
 const workflow = (): Workflow => ({
@@ -42,5 +42,20 @@ describe("collaborative workflow operations", () => {
     const applied = applyCollaborationOperation(before, operation);
     expect(applied.nodes.map((node) => node.id)).toEqual(["trigger"]);
     expect(applied.edges).toEqual([]);
+  });
+
+  it("bootstraps a collaborator without transmitting local permissions or enablement", () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "20000000-0000-4000-8000-000000000002" });
+    const source = workflow(); source.enabled = true;
+    const operation = snapshotCollaborativeWorkflow(source, "host", 0);
+    const encoded = JSON.stringify(operation);
+    expect(encoded).not.toContain("C:/private");
+    expect(encoded).not.toContain("commandExecutionPermitted");
+    const target = workflow(); target.name = "Outdated"; target.settings.permissions.approvedFolders = ["D:/local"];
+    const applied = applyCollaborationOperation(target, parseCollaborationOperation(operation, { workflowId: source.id, operationId: operation.operationId, baseSequence: 0 }));
+    expect(applied.name).toBe("Shared");
+    expect(applied.enabled).toBe(false);
+    expect(applied.settings.permissions.approvedFolders).toEqual(["D:/local"]);
+    vi.unstubAllGlobals();
   });
 });

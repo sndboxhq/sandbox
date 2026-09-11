@@ -126,7 +126,7 @@ export function CommandShell({ open, onOpenChange, onShortcuts, onLauncher }: {
 }
 
 function confirmationFor(command: ParsedCommand) {
-  if (["workflow run", "workflow enable", "workflow archive", "node delete", "node test", "run cancel", "run retry", "connection test"].includes(command.path))
+  if (["workflow run", "workflow join", "workflow enable", "workflow archive", "node delete", "node test", "run cancel", "run retry", "connection test"].includes(command.path))
     return "This command changes workflow state, starts work, or performs an externally consequential check. It uses the same validation and permission guardrails as the graphical control.";
   return undefined;
 }
@@ -158,8 +158,19 @@ async function execute(command: ParsedCommand, ui: { onShortcuts: () => void; on
     if (inspection) window.dispatchEvent(new CustomEvent("sandbox:workflow-import-inspected", { detail: inspection }));
     return { text: inspection ? `Inspected ${inspection.name}. Confirm the staged import to add it.` : "Import cancelled." };
   }
+  if(command.path==="workflow join"){
+    guardUnsaved();
+    if(!target)throw new Error("Paste the sndbox collaboration invite after `workflow join`.");
+    window.dispatchEvent(new CustomEvent(currentEditorWorkflow()?"sandbox:workflow-collaboration":"sandbox:join-collaboration",{detail:{action:"join",inviteCode:target}}));
+    return{text:"Joining the end-to-end encrypted live canvas. The invite is excluded from command history."};
+  }
+  if(command.path==="workflow collaborators"){
+    const current=(window as Window&{__sandboxCollaboration?:{live:boolean;participants:Array<{displayName:string}>}}).__sandboxCollaboration;
+    if(!current?.live)return{text:"This workflow does not have an active live canvas."};
+    return{text:current.participants.length?current.participants.map(person=>person.displayName).join("\n"):"Live canvas is connected; encrypted presence is still arriving."};
+  }
 
-  const workflowCommands = ["workflow open", "workflow run", "workflow validate", "workflow diagnose", "workflow permissions", "workflow revisions", "workflow duplicate", "workflow enable", "workflow disable", "workflow archive", "workflow export"];
+  const workflowCommands = ["workflow open", "workflow run", "workflow validate", "workflow diagnose", "workflow permissions", "workflow revisions", "workflow share", "workflow duplicate", "workflow enable", "workflow disable", "workflow archive", "workflow export"];
   if (workflowCommands.includes(command.path)) {
     const workflow = await resolveWorkflow(target, currentEditorWorkflow() ?? store.activeWorkflow);
     if (command.path === "workflow open") { guardUnsaved(); await store.openWorkflow(workflow.id); return { text: `Opened ${workflow.name}.` }; }
@@ -171,6 +182,7 @@ async function execute(command: ParsedCommand, ui: { onShortcuts: () => void; on
       return { text: [...issues.map((issue) => `${issue.severity.toUpperCase()} ${issue.code}: ${issue.message}`), ...gateLines].join("\n") || "Workflow contracts, gates, and configuration are ready." };
     }
     if (command.path === "workflow permissions") { if (store.activeWorkflow?.id !== workflow.id) await store.openWorkflow(workflow.id); window.setTimeout(() => window.dispatchEvent(new CustomEvent("sandbox:review-permissions")), 0); return { text: `Opened permission review for ${workflow.name}.` }; }
+    if (command.path === "workflow share") { guardUnsaved(); if (store.activeWorkflow?.id !== workflow.id) await store.openWorkflow(workflow.id); window.setTimeout(()=>window.dispatchEvent(new CustomEvent("sandbox:workflow-collaboration",{detail:{action:"share"}})),0); return{text:`Opened secure sharing for ${workflow.name}.`}; }
     if (command.path === "workflow revisions") { const revisions = await api.listWorkflowRevisions(workflow.id); return { text: revisions.map((item) => `${item.current ? "*" : " "} ${item.revisionId} · schema ${item.schemaVersion} · ${item.changeSummary}`).join("\n") || "No saved revisions." }; }
     if (command.path === "workflow duplicate") { const copy = await api.duplicateWorkflow(workflow.id, typeof command.flags.name === "string" ? command.flags.name : undefined); await store.load(); return { text: `Duplicated as ${copy.name} (${copy.id}).` }; }
     if (command.path === "workflow archive") { guardUnsaved(); await api.archiveWorkflow(workflow.id); await store.load(); return { text: `Archived ${workflow.name}.` }; }
@@ -226,7 +238,7 @@ async function executeNode(command: ParsedCommand, active?: Workflow): Promise<C
 function helpText() {
   return `Commands:
   go workflows|history|plugins|cloud|approvals|settings
-  workflow list|open|create|run|validate|diagnose|permissions|revisions|duplicate|enable|disable|archive|import|export
+  workflow list|open|create|run|validate|diagnose|permissions|revisions|share|join|collaborators|duplicate|enable|disable|archive|import|export
   node list|add|select|test|customize|contract|gates|web-builder|unlink|enable|disable|delete
   run list|show|logs|cancel|retry
   runner status|pause|resume

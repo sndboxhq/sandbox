@@ -25,6 +25,7 @@ import {
   Tags as TagsIcon,
   Trash2,
   Upload,
+  UsersRound,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -472,10 +473,13 @@ export function Dashboard() {
           </p>
         </div>
         {tab === "workflows" && (
-          <button className="button" onClick={() => void importWorkflow()}>
-            <Upload size={14} />
-            Import
-          </button>
+          <>
+            {accountConnected&&<button className="button" onClick={()=>window.dispatchEvent(new CustomEvent("sandbox:join-collaboration"))}><UsersRound size={14}/> Join live canvas</button>}
+            <button className="button" onClick={() => void importWorkflow()}>
+              <Upload size={14} />
+              Import
+            </button>
+          </>
         )}
         <button className="button primary" onClick={() => openCreate()}>
           <Plus size={15} />

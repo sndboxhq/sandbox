@@ -1,0 +1,10 @@
+import {describe,expect,it} from "vitest";
+import {invalidatePermissionApprovals} from "./permissionApprovals";
+import type {Workflow} from "./types";
+
+const workflow=():Workflow=>({id:"workflow",schemaVersion:7,name:"Local",description:"",enabled:false,triggerNodeId:"trigger",nodes:[{id:"trigger",type:"manual_trigger",version:1,name:"Manual",position:{x:0,y:0},configuration:{},disabled:false},{id:"http",type:"http_request",version:1,name:"Request",position:{x:200,y:0},configuration:{url:"https://api.example.com"},disabled:false}],edges:[{id:"edge",sourceNodeId:"trigger",sourceHandle:"output",targetNodeId:"http",targetHandle:"input"}],settings:{defaultNodeTimeoutMs:30_000,maxConcurrentNodes:4,permissions:{approvedFolders:["C:/safe"],approvedNetworkDomains:["api.example.com"],commandExecutionPermitted:true,backgroundExecutionPermitted:true,approvalRevision:"old",approvedBrowserProfileIds:["profile"],browserAutomationPermitted:true,externalCommunicationPermitted:true,externalDataWritePermitted:true,communicationApprovalRevision:"old",approvedEnvironmentVariables:["TOKEN"]}},createdAt:"2026-01-01T00:00:00Z",updatedAt:"2026-01-01T00:00:00Z"});
+
+describe("permission approval invalidation",()=>{
+  it("revokes all device authority after a semantic graph edit",()=>{const before=workflow(),after=structuredClone(before);after.nodes[1].configuration.url="https://api.example.com/v2";expect(invalidatePermissionApprovals(before,after).settings.permissions).toMatchObject({approvedFolders:[],approvedNetworkDomains:[],commandExecutionPermitted:false,backgroundExecutionPermitted:false,approvedBrowserProfileIds:[],browserAutomationPermitted:false,externalCommunicationPermitted:false,externalDataWritePermitted:false,approvedEnvironmentVariables:[]})});
+  it("preserves approvals for layout-only changes",()=>{const before=workflow(),after=structuredClone(before);after.nodes[1].position={x:320,y:80};expect(invalidatePermissionApprovals(before,after).settings.permissions).toEqual(before.settings.permissions)});
+});

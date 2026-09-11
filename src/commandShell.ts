@@ -1,7 +1,7 @@
 export const COMMAND_PATHS = [
   "help","clear","history",
   ...["workflows","history","plugins","cloud","approvals","settings"].map(value=>`go ${value}`),
-  ...["list","open","create","run","validate","diagnose","permissions","revisions","duplicate","enable","disable","archive","import","export"].map(value=>`workflow ${value}`),
+  ...["list","open","create","run","validate","diagnose","permissions","revisions","share","join","collaborators","duplicate","enable","disable","archive","import","export"].map(value=>`workflow ${value}`),
   ...["list","add","select","test","customize","contract","gates","web-builder","unlink","enable","disable","delete"].map(value=>`node ${value}`),
   ...["list","show","logs","cancel","retry"].map(value=>`run ${value}`),
   ...["status","pause","resume"].map(value=>`runner ${value}`),
@@ -71,5 +71,6 @@ const sourceWithoutSensitiveWhitespace=(value:string)=>value.trim().replace(/\s+
 
 export function shouldPersistCommand(command:ParsedCommand):boolean{
   return !Object.keys(command.flags).some(key=>/secret|token|password|credential/i.test(key))
-    && !/\b(secret|token|password|credential)\b/i.test(command.path);
+    && !/\b(secret|token|password|credential)\b/i.test(command.path)
+    && command.path!=="workflow join";
 }

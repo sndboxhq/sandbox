@@ -24,6 +24,7 @@ import {
   Play,
   RotateCcw,
   Save,
+  Share2,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -65,6 +66,8 @@ import {
 } from "../workflowConnections";
 import type {
   BrowserProfile,
+  CollaborationSessionHandle,
+  DecryptedCollaborationPresence,
   ExecutionRecord,
   InstalledPlugin,
   NodeContract,
@@ -74,11 +77,11 @@ import type {
   RecordedStep,
   ValidationIssue,
   Workflow,
+  WorkflowCollaborationOperation,
   WorkflowNode,
   WorkflowRevisionSummary,
 } from "../types";
 import "../permissionReview.css";
-import { CustomNodeEditor } from "./CustomNodeEditor";
 import { BrowserRecorder } from "./BrowserRecorder";
 import {
   AiWorkflowChat,
@@ -98,6 +101,10 @@ import { clearWorkflowDraft, draftUsesEarlierBase, readWorkflowDraft, writeWorkf
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "../workspaceState";
 import { isTextEntryTarget, useKeyboardShortcuts } from "../useKeyboardShortcuts";
 import { useAiWorkflowStore } from "../aiWorkflowStore";
+import { applyCollaborationOperation, diffCollaborativeWorkflow, parseCollaborationOperation, snapshotCollaborativeWorkflow } from "../collaboration";
+import { CollaborationDialog } from "./CollaborationDialog";
+import { collaborationDeviceColor, collaborationDeviceIdentity, collaborationSessionFor, forgetCollaborationSession, rememberCollaborationSession } from "../collaborationSession";
+import { invalidatePermissionApprovals } from "../permissionApprovals";
 
 const nodeTypes = { workflow: WorkflowNodeCard };
 const AccessibleWorkflowEditor = lazy(() =>
@@ -105,6 +112,9 @@ const AccessibleWorkflowEditor = lazy(() =>
 );
 const NodeInspector = lazy(() =>
   import("./NodeInspector").then((module) => ({ default: module.NodeInspector })),
+);
+const CustomNodeEditor = lazy(() =>
+  import("./CustomNodeEditor").then((module) => ({ default: module.CustomNodeEditor })),
 );
 const workflowNodeDimensions = { width: 194, height: 112 } as const;
 
@@ -215,6 +225,8 @@ function readRecoveryContext(workflowId: string): RecoveryContext | undefined {
   }
 }
 
+const collaborationWorkspaceStorageKey = "sandbox.cloud.workspace";
+
 export function WorkflowEditor() {
   const toast = useToast();
   const { activeWorkflow, setView, saveWorkflow } = useAppStore();
@@ -289,6 +301,20 @@ export function WorkflowEditor() {
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>(
     [],
   );
+  const [initialCollaboration]=useState(()=>collaborationSessionFor(activeWorkflow!.id));
+  const [collaborationOpen,setCollaborationOpen]=useState(false);
+  const [collaborationHandle,setCollaborationHandle]=useState<CollaborationSessionHandle|undefined>(initialCollaboration?.handle);
+  const [collaborators,setCollaborators]=useState<DecryptedCollaborationPresence[]>([]);
+  const [collaborationBusy,setCollaborationBusy]=useState(false);
+  const [collaborationError,setCollaborationError]=useState<string>();
+  const [collaborationDeviceId]=useState(collaborationDeviceIdentity);
+  const [collaborationDeviceColorValue]=useState(()=>collaborationDeviceColor(collaborationDeviceId));
+  const collaborationHandleRef=useRef<CollaborationSessionHandle|undefined>(undefined);
+  const collaborationAppliedSequence=useRef(initialCollaboration?.appliedSequence??0);
+  const collaborationClientSequence=useRef(initialCollaboration?.clientSequence??0);
+  const collaborationPublishQueue=useRef<Promise<void>>(Promise.resolve());
+  const collaborationPendingOperations=useRef<WorkflowCollaborationOperation[]>([]);
+  const workflowRef=useRef(workflow);
   const past = useRef<Workflow[]>([]);
   const future = useRef<Workflow[]>([]);
   const validationRequest = useRef(0);
@@ -301,6 +327,8 @@ export function WorkflowEditor() {
     () => connectedNodeRoles(workflow.edges, selectedNodeId),
     [selectedNodeId, workflow.edges],
   );
+  workflowRef.current=workflow;
+  collaborationHandleRef.current=collaborationHandle;
   const openPermissionReview = (request?: PermissionReviewRequest) => {
     setPermissionRequest(request);
     setPermissionOpen(true);
@@ -349,15 +377,37 @@ export function WorkflowEditor() {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
   };
+  const publishCollaborativeChange=useCallback((previous:Workflow,next:Workflow)=>{
+    const handle=collaborationHandleRef.current;
+    if(!handle)return;
+    const operation=diffCollaborativeWorkflow(previous,next,collaborationDeviceId,collaborationAppliedSequence.current);
+    if(!operation)return;
+    collaborationPendingOperations.current.push(operation);
+    collaborationPublishQueue.current=collaborationPublishQueue.current.then(async()=>{
+      const sequenced={...operation,baseSequence:collaborationAppliedSequence.current};
+      collaborationPendingOperations.current=collaborationPendingOperations.current.map(pending=>pending.operationId===sequenced.operationId?sequenced:pending);
+      collaborationClientSequence.current+=1;
+      await api.appendWorkflowCollaborationOperation(handle,sequenced,collaborationClientSequence.current);
+      rememberCollaborationSession({handle,appliedSequence:collaborationAppliedSequence.current,clientSequence:collaborationClientSequence.current});
+      setCollaborationError(undefined);
+    }).catch(error=>{
+      collaborationPendingOperations.current=collaborationPendingOperations.current.filter(pending=>pending.operationId!==operation.operationId);
+      const message=`Live edit was not published: ${String(error)}`;
+      setCollaborationError(message);
+      toast.push(message,"error");
+    });
+  },[collaborationDeviceId,toast]);
   const commit = useCallback(
     (next: Workflow) => {
       actionSerial.current += 1;
       past.current.push(structuredClone(workflow));
       if (past.current.length > 50) past.current.shift();
       future.current = [];
-      setWorkflow(invalidatePermissionApprovals(workflow, next));
+      const secured=invalidatePermissionApprovals(workflow,next);
+      publishCollaborativeChange(workflow,secured);
+      setWorkflow(secured);
     },
-    [workflow],
+    [workflow,publishCollaborativeChange],
   );
   const patchWorkflow = useCallback(
     (patch: Partial<Workflow>) => commit({ ...workflow, ...patch }),
@@ -474,6 +524,138 @@ export function WorkflowEditor() {
       .listInstalledPlugins(owner.ownerType, owner.ownerId)
       .then(setInstalledPlugins);
   }, [workflow.owner?.ownerType, workflow.owner?.ownerId]);
+  useEffect(()=>{
+    if(!collaborationHandle)return;
+    let cancelled=false;
+    let timer=0;
+    const poll=async()=>{
+      try{
+        const page=await api.pollWorkflowCollaborationOperations(collaborationHandle,collaborationAppliedSequence.current);
+        if(cancelled)return;
+        let next=workflowRef.current;
+        let sequence=collaborationAppliedSequence.current;
+        let receivedRemoteOperation=false;
+        for(const item of [...page.items].sort((left,right)=>left.sequence-right.sequence)){
+          if(item.sequence<=sequence)continue;
+          if(item.sequence!==sequence+1)throw new Error(`Collaboration sequence gap: expected ${sequence+1}, received ${item.sequence}.`);
+          const operation=parseCollaborationOperation(item.payload,{workflowId:collaborationHandle.session.workflowId,operationId:item.operationId,baseSequence:item.baseSequence});
+          if(operation.actorId!==collaborationDeviceId)receivedRemoteOperation=true;
+          const ownSnapshot=operation.actorId===collaborationDeviceId&&operation.changes.length===1&&operation.changes[0].kind==="workflow_snapshot";
+          if(!ownSnapshot){const applied=applyCollaborationOperation(next,operation);next=invalidatePermissionApprovals(next,applied)}
+          collaborationPendingOperations.current=collaborationPendingOperations.current.filter(pending=>pending.operationId!==operation.operationId);
+          sequence=item.sequence;
+        }
+        for(const pending of collaborationPendingOperations.current)next=applyCollaborationOperation(next,pending);
+        collaborationAppliedSequence.current=sequence;
+        rememberCollaborationSession({handle:collaborationHandle,appliedSequence:sequence,clientSequence:collaborationClientSequence.current});
+        if(next!==workflowRef.current){
+          if(receivedRemoteOperation){past.current=[];future.current=[]}
+          workflowRef.current=next;
+          setWorkflow(next);
+          if(receivedRemoteOperation)setAnnouncement("Encrypted changes from another editor were applied. Local undo history was reset.");
+        }
+        if(page.latestSequence<sequence)throw new Error("The collaboration service returned a stale sequence.");
+        setCollaborationError(undefined);
+        timer=window.setTimeout(poll,page.items.length>=50?40:750);
+      }catch(error){
+        if(cancelled)return;
+        setCollaborationError(`Live sync paused: ${String(error)}`);
+        timer=window.setTimeout(poll,1800);
+      }
+    };
+    void poll();
+    return()=>{cancelled=true;window.clearTimeout(timer)};
+  },[collaborationHandle,collaborationDeviceId]);
+  useEffect(()=>{
+    if(!collaborationHandle)return;
+    let cancelled=false;
+    let timer=0;
+    const heartbeat=async()=>{
+      try{
+        await api.updateWorkflowCollaborationPresence(collaborationHandle,collaborationDeviceId,collaborationDeviceColorValue,{selectedNodeIds:selectedNodeId?[selectedNodeId]:[],viewport:instance?.getViewport()});
+        const current=await api.listWorkflowCollaborationPresence(collaborationHandle);
+        if(cancelled)return;
+        setCollaborators(current.map(person=>({
+          ...person,
+          payload:{
+            selectedNodeIds:Array.isArray(person.payload?.selectedNodeIds)?person.payload.selectedNodeIds.filter(value=>typeof value==="string").slice(0,100):[],
+            cursor:person.payload?.cursor&&Number.isFinite(person.payload.cursor.x)&&Number.isFinite(person.payload.cursor.y)?person.payload.cursor:undefined,
+            viewport:person.payload?.viewport&&Number.isFinite(person.payload.viewport.x)&&Number.isFinite(person.payload.viewport.y)&&Number.isFinite(person.payload.viewport.zoom)?person.payload.viewport:undefined,
+          },
+        })));
+        timer=window.setTimeout(heartbeat,4_000);
+      }catch(error){
+        if(cancelled)return;
+        setCollaborationError(current=>current??`Presence update failed: ${String(error)}`);
+        timer=window.setTimeout(heartbeat,6_000);
+      }
+    };
+    void heartbeat();
+    return()=>{cancelled=true;window.clearTimeout(timer)};
+  },[collaborationHandle,collaborationDeviceColorValue,collaborationDeviceId,instance,selectedNodeId]);
+  const startCollaboration=async(workspaceId:string)=>{
+    setCollaborationBusy(true);setCollaborationError(undefined);
+    let started:CollaborationSessionHandle|undefined;
+    try{
+      if(dirty)throw new Error("Save the workflow before starting a shared canvas.");
+      const safeWorkflow=await api.prepareWorkflowCollaborationSnapshot(workflow.id);
+      const handle=await api.startWorkflowCollaboration(workspaceId,workflow.id,collaborationDeviceId,collaborationDeviceColorValue);
+      started=handle;
+      const snapshot=snapshotCollaborativeWorkflow(safeWorkflow,collaborationDeviceId,0);
+      collaborationClientSequence.current=1;
+      await api.appendWorkflowCollaborationOperation(handle,snapshot,1);
+      collaborationAppliedSequence.current=0;
+      localStorage.setItem(collaborationWorkspaceStorageKey,workspaceId);
+      rememberCollaborationSession({handle,appliedSequence:0,clientSequence:1});
+      setCollaborationHandle(handle);setCollaborators([]);setCollaborationOpen(false);
+      toast.push("Secure live canvas started. Share the invite code when you are ready.","success");
+    }catch(error){if(started)void api.leaveWorkflowCollaboration(started,collaborationDeviceId).catch(()=>undefined);setCollaborationError(String(error))}
+    finally{setCollaborationBusy(false)}
+  };
+  const joinCollaboration=async(inviteCode:string)=>{
+    setCollaborationBusy(true);setCollaborationError(undefined);
+    try{
+      if(dirty)throw new Error("Save or discard local changes before joining a shared canvas.");
+      const handle=await api.joinWorkflowCollaboration(inviteCode,collaborationDeviceId,collaborationDeviceColorValue);
+      if(handle.session.workflowId!==workflow.id){
+        await api.leaveWorkflowCollaboration(handle,collaborationDeviceId);
+        throw new Error("This invite belongs to another workflow. Open its matching local workflow before joining.");
+      }
+      collaborationAppliedSequence.current=0;collaborationClientSequence.current=0;
+      rememberCollaborationSession({handle,appliedSequence:0,clientSequence:0});
+      setCollaborationHandle(handle);setCollaborators([]);setCollaborationOpen(false);
+      toast.push("Joined the encrypted live canvas.","success");
+    }catch(error){setCollaborationError(String(error))}
+    finally{setCollaborationBusy(false)}
+  };
+  const leaveCollaboration=async()=>{
+    const handle=collaborationHandleRef.current;if(!handle)return;
+    setCollaborationBusy(true);
+    try{
+      await collaborationPublishQueue.current;
+      await api.leaveWorkflowCollaboration(handle,collaborationDeviceId);
+      setCollaborationHandle(undefined);setCollaborators([]);setCollaborationError(undefined);setCollaborationOpen(false);
+      forgetCollaborationSession(handle.session.workflowId);
+      collaborationAppliedSequence.current=0;collaborationClientSequence.current=0;
+      collaborationPendingOperations.current=[];
+      toast.push("You left the live canvas.","info");
+    }catch(error){setCollaborationError(String(error))}
+    finally{setCollaborationBusy(false)}
+  };
+  useEffect(()=>{
+    const listener=(event:Event)=>{
+      const detail=(event as CustomEvent<{action?:string;inviteCode?:string}>).detail;
+      if(detail?.action==="join"&&detail.inviteCode){void joinCollaboration(detail.inviteCode);return}
+      setCollaborationOpen(true);
+    };
+    window.addEventListener("sandbox:workflow-collaboration",listener);
+    return()=>window.removeEventListener("sandbox:workflow-collaboration",listener);
+  });
+  useEffect(()=>{
+    const target=window as Window&{__sandboxCollaboration?:{live:boolean;participants:Array<{displayName:string}>}};
+    target.__sandboxCollaboration={live:Boolean(collaborationHandle),participants:collaborators.map(person=>({displayName:person.displayName}))};
+    return()=>{delete target.__sandboxCollaboration};
+  },[collaborationHandle,collaborators]);
   useEffect(() => {
     if (!api.isDesktop) return;
     let stop: undefined | (() => void);
@@ -1028,6 +1210,7 @@ export function WorkflowEditor() {
             ? "This node failed during the latest run."
             : undefined);
         const connectionRole = connectionRoles.get(node.id);
+        const remoteEditors=collaborators.filter(person=>person.deviceId!==collaborationDeviceId&&person.payload.selectedNodeIds.includes(node.id));
 
         return {
           id: node.id,
@@ -1037,6 +1220,8 @@ export function WorkflowEditor() {
           initialHeight: workflowNodeDimensions.height,
           handles: workflowNodeHandles(node),
           selected: node.id === selectedNodeId,
+          className:remoteEditors.length?"remote-selected":undefined,
+          style:remoteEditors.length?{"--collaborator-color":remoteEditors[0].color} as CSSProperties:undefined,
           ariaLabel: `${node.name}, ${node.type.replaceAll("_", " ")}${connectionRole ? `, ${connectionRole} of selected node` : ""}, position x ${Math.round(node.position.x)}, y ${Math.round(node.position.y)}`,
           data: {
             node,
@@ -1073,6 +1258,8 @@ export function WorkflowEditor() {
       showAskAiOnNodeIssues,
       openAiForNode,
       connectionRoles,
+      collaborators,
+      collaborationDeviceId,
     ],
   );
   const [displayNodes, setDisplayNodes, onDisplayNodesChange] =
@@ -1137,7 +1324,7 @@ export function WorkflowEditor() {
     if (next) commit(next);
   };
   if(customDraft)return <>
-    <CustomNodeEditor workflow={workflow} node={customDraft.node} source={customDraft.source} onChange={node=>setCustomDraft(current=>current?{...current,node}:current)} onSave={()=>{const next=customDraft.isNew?{...workflow,nodes:[...workflow.nodes,customDraft.node]}:{...workflow,nodes:workflow.nodes.map(node=>node.id===customDraft.node.id?customDraft.node:node)};commit(next);setSelectedNodeId(customDraft.node.id);setCustomDraft(undefined);toast.push("Custom ƒx draft saved to the workflow. Verify its fixtures before running.","success")}} onBack={()=>{if(JSON.stringify(customDraft.node)!==customDraft.initial)setCustomLeaveOpen(true);else setCustomDraft(undefined)}} onAi={()=>{setAiChatContext({key:`custom:${customDraft.node.id}`,label:`Custom function: ${customDraft.node.name}`,prompt:`Help improve the ${customDraft.node.customization?.language} custom function and its declared sndbox input, output, and branch contract. It must return { outputs, branches? } and cannot use ambient host capabilities.`});setAiChatOpen(true)}}/>
+    <Suspense fallback={<main className="fx-editor" aria-busy="true"><div className="drawer-empty">Loading custom function workspace…</div></main>}><CustomNodeEditor workflow={workflow} node={customDraft.node} source={customDraft.source} onChange={node=>setCustomDraft(current=>current?{...current,node}:current)} onSave={()=>{const next=customDraft.isNew?{...workflow,nodes:[...workflow.nodes,customDraft.node]}:{...workflow,nodes:workflow.nodes.map(node=>node.id===customDraft.node.id?customDraft.node:node)};commit(next);setSelectedNodeId(customDraft.node.id);setCustomDraft(undefined);toast.push("Custom ƒx draft saved to the workflow. Verify its fixtures before running.","success")}} onBack={()=>{if(JSON.stringify(customDraft.node)!==customDraft.initial)setCustomLeaveOpen(true);else setCustomDraft(undefined)}} onAi={()=>{setAiChatContext({key:`custom:${customDraft.node.id}`,label:`Custom function: ${customDraft.node.name}`,prompt:`Help improve the ${customDraft.node.customization?.language} custom function and its declared sndbox input, output, and branch contract. It must return { outputs, branches? } and cannot use ambient host capabilities.`});setAiChatOpen(true)}}/></Suspense>
     <ConfirmDialog open={customLeaveOpen} onOpenChange={setCustomLeaveOpen} title="Discard custom function changes?" description="Code, contract, and fixture edits in this full-page draft have not been saved to the workflow." confirmLabel="Discard changes" dangerous onConfirm={()=>{setCustomLeaveOpen(false);setCustomDraft(undefined)}}/>
   </>;
   return (
@@ -1177,6 +1364,12 @@ export function WorkflowEditor() {
           {workflow.enabled ? "Enabled" : "Disabled"}
         </label>
         <div className="topbar-spacer" />
+        <Tooltip content={collaborationHandle?"Manage live canvas":"Share this workflow canvas"}>
+          <button className={`button collaboration-toolbar ${collaborationHandle?"live":""}`} onClick={()=>setCollaborationOpen(true)} aria-label={collaborationHandle?`Live canvas with ${collaborators.length||1} editors`:"Share workflow canvas"}>
+            <Share2 size={14}/><span>{collaborationHandle?"Live":"Share"}</span>
+            {collaborationHandle&&<span className="collaboration-toolbar-avatars" aria-hidden="true">{collaborators.slice(0,3).map(person=><i className="collaboration-avatar" style={{background:person.color}} key={`${person.accountId}:${person.deviceId}`}>{(person.displayName[0]??"?").toUpperCase()}</i>)}</span>}
+          </button>
+        </Tooltip>
         <Tooltip content={aiChatOpen ? "Close AI builder" : "Open AI builder"}>
           <button
             className={`ai-chat-trigger ${aiChatOpen ? "active" : ""}`}
@@ -1608,6 +1801,13 @@ export function WorkflowEditor() {
             action: () => openPermissionReview(),
           },
           {
+            id: "editor-collaboration",
+            group: "Editor",
+            name: collaborationHandle ? "Manage live canvas" : "Share workflow canvas",
+            description: collaborationHandle ? `${collaborators.length || 1} editors are connected securely.` : "Start or join an end-to-end encrypted editing session.",
+            action: () => setCollaborationOpen(true),
+          },
+          {
             id: "editor-back",
             group: "Navigation",
             name: "Back to workflows",
@@ -1643,6 +1843,18 @@ export function WorkflowEditor() {
           }}
         />
       )}
+      <CollaborationDialog
+        open={collaborationOpen}
+        onOpenChange={setCollaborationOpen}
+        handle={collaborationHandle}
+        participants={collaborators}
+        busy={collaborationBusy}
+        error={collaborationError}
+        defaultWorkspaceId={localStorage.getItem(collaborationWorkspaceStorageKey)??""}
+        onStart={workspaceId=>void startCollaboration(workspaceId)}
+        onJoin={inviteCode=>void joinCollaboration(inviteCode)}
+        onLeave={()=>void leaveCollaboration()}
+      />
       <Dialog
         open={revisionOpen}
         onOpenChange={setRevisionOpen}
@@ -1729,57 +1941,6 @@ export function WorkflowEditor() {
       </div>
     </main>
   );
-}
-
-function workflowSemanticSignature(workflow: Workflow) {
-  return JSON.stringify({
-    triggerNodeId: workflow.triggerNodeId,
-    nodes: workflow.nodes
-      .filter((node) => node.type !== "note")
-      .map((node) => ({
-        id: node.id,
-        type: node.type,
-        version: node.version,
-        configuration: node.configuration,
-        disabled: node.disabled,
-        inputBindings: node.inputBindings,
-        plugin: node.plugin,
-        customization: node.customization,
-        errorPolicy: node.errorPolicy,
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id)),
-    edges: workflow.edges
-      .map((edge) => ({
-        id: edge.id,
-        sourceNodeId: edge.sourceNodeId,
-        sourceHandle: edge.sourceHandle,
-        targetNodeId: edge.targetNodeId,
-        targetHandle: edge.targetHandle,
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id)),
-  });
-}
-
-function invalidatePermissionApprovals(previous: Workflow, next: Workflow): Workflow {
-  if (workflowSemanticSignature(previous) === workflowSemanticSignature(next)) return next;
-  const nodeTypes = new Set(next.nodes.map((node) => node.type));
-  const permissions = { ...next.settings.permissions };
-  if (["run_command", "code", "javascript_code", "python_code"].some((type) => nodeTypes.has(type))) {
-    permissions.commandExecutionPermitted = false;
-    permissions.approvalRevision = null;
-  }
-  if (["gmail_create_draft", "gmail_send_email", "discord_webhook", "discord_embed", "slack_webhook"].some((type) => nodeTypes.has(type))) {
-    permissions.externalCommunicationPermitted = false;
-    permissions.communicationApprovalRevision = null;
-  }
-  if (["gmail_create_draft", "gmail_add_label"].some((type) => nodeTypes.has(type))) {
-    permissions.externalDataWritePermitted = false;
-  }
-  if (["open_browser", "navigate", "click_element", "fill_field", "select_option", "press_key", "wait_for", "extract_data", "screenshot", "download_file", "upload_file", "close_browser"].some((type) => nodeTypes.has(type))) {
-    permissions.browserAutomationPermitted = false;
-    permissions.approvedBrowserProfileIds = [];
-  }
-  return { ...next, settings: { ...next.settings, permissions } };
 }
 
 type WorkflowPermissionKind =

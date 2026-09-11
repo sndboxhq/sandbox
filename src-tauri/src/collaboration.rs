@@ -126,7 +126,10 @@ impl CollaborationCrypto {
         key.zeroize();
         let encoded = serde_json::to_vec(&invite)
             .map_err(|_| "The collaboration invite could not be encoded.".to_string())?;
-        Ok(format!("{INVITE_PREFIX}{}", URL_SAFE_NO_PAD.encode(encoded)))
+        Ok(format!(
+            "{INVITE_PREFIX}{}",
+            URL_SAFE_NO_PAD.encode(encoded)
+        ))
     }
 
     pub(crate) fn inspect_invite(&self, code: &str) -> Result<CollaborationInvite, String> {
@@ -173,7 +176,7 @@ impl CollaborationCrypto {
         let aad = format!(
             "sndbox-collaboration-operation-v1:{workspace_id}:{workflow_id}:{session_id}:{operation_id}"
         );
-        let encrypted = encrypt_blob(&key, plaintext.as_slice(), aad.as_bytes())?;
+        let encrypted = encrypt_blob(key.as_ref(), plaintext.as_slice(), aad.as_bytes())?;
         let hash = payload_hash(&encrypted)?;
         Ok((encrypted, hash))
     }
@@ -198,7 +201,7 @@ impl CollaborationCrypto {
             "sndbox-collaboration-operation-v1:{workspace_id}:{workflow_id}:{session_id}:{}",
             operation.operation_id
         );
-        let plaintext = decrypt_blob(&key, &operation.encrypted_payload, aad.as_bytes())?;
+        let plaintext = decrypt_blob(key.as_ref(), &operation.encrypted_payload, aad.as_bytes())?;
         if plaintext.len() > MAX_OPERATION_BYTES {
             return Err("The decrypted collaboration operation exceeds the 1 MB limit.".into());
         }
@@ -230,10 +233,9 @@ impl CollaborationCrypto {
         validate_uuid(device_id, "Device")?;
         let plaintext = encode_value(value, MAX_PRESENCE_BYTES, "Collaboration presence")?;
         let key = self.load_key(session_id)?;
-        let aad = format!(
-            "sndbox-collaboration-presence-v1:{workflow_id}:{session_id}:{device_id}"
-        );
-        encrypt_blob(&key, plaintext.as_slice(), aad.as_bytes())
+        let aad =
+            format!("sndbox-collaboration-presence-v1:{workflow_id}:{session_id}:{device_id}");
+        encrypt_blob(key.as_ref(), plaintext.as_slice(), aad.as_bytes())
     }
 
     pub fn decrypt_presence(
@@ -248,7 +250,7 @@ impl CollaborationCrypto {
             "sndbox-collaboration-presence-v1:{workflow_id}:{session_id}:{}",
             presence.device_id
         );
-        let plaintext = decrypt_blob(&key, &presence.encrypted_presence, aad.as_bytes())?;
+        let plaintext = decrypt_blob(key.as_ref(), &presence.encrypted_presence, aad.as_bytes())?;
         if plaintext.len() > MAX_PRESENCE_BYTES {
             return Err("The decrypted collaboration presence exceeds the 8 KB limit.".into());
         }
@@ -328,8 +330,8 @@ fn decode_key(encoded: &str) -> Result<[u8; 32], String> {
 }
 
 fn encode_value(value: &Value, maximum: usize, label: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    let encoded = serde_json::to_vec(value)
-        .map_err(|_| format!("{label} could not be encoded as JSON."))?;
+    let encoded =
+        serde_json::to_vec(value).map_err(|_| format!("{label} could not be encoded as JSON."))?;
     if encoded.len() > maximum {
         return Err(format!("{label} exceeds the {} KB limit.", maximum / 1024));
     }
@@ -342,7 +344,13 @@ fn encrypt_blob(key: &[u8], plaintext: &[u8], aad: &[u8]) -> Result<String, Stri
     let mut nonce = [0_u8; NONCE_BYTES];
     rand::rng().fill_bytes(&mut nonce);
     let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce), Payload { msg: plaintext, aad })
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .map_err(|_| "Collaboration encryption failed.".to_string())?;
     let mut blob = Vec::with_capacity(NONCE_BYTES + ciphertext.len());
     blob.extend_from_slice(&nonce);
@@ -395,7 +403,11 @@ mod tests {
             Ok(())
         }
         fn get(&self, id: &str) -> Result<Value, String> {
-            self.0.lock().get(id).cloned().ok_or_else(|| "missing".into())
+            self.0
+                .lock()
+                .get(id)
+                .cloned()
+                .ok_or_else(|| "missing".into())
         }
         fn delete(&self, id: &str) -> Result<(), String> {
             self.0.lock().remove(id);
@@ -436,10 +448,10 @@ mod tests {
                 &workflow,
                 &session,
                 EncryptedCollaborationOperation {
-                    session_id: session,
+                    session_id: session.clone(),
                     sequence: 1,
                     operation_id: operation,
-                    workflow_id: workflow,
+                    workflow_id: workflow.clone(),
                     actor_account_id: Uuid::new_v4().to_string(),
                     base_sequence: 0,
                     client_sequence: 1,
@@ -457,7 +469,9 @@ mod tests {
     fn rejects_invite_ciphertext_and_context_tampering() {
         let crypto = CollaborationCrypto::new(Arc::new(MemoryVault::default()));
         let (workspace, workflow, session, operation) = identifiers();
-        let code = crypto.create_invite(&workspace, &workflow, &session).unwrap();
+        let code = crypto
+            .create_invite(&workspace, &workflow, &session)
+            .unwrap();
         assert!(crypto.inspect_invite(&(code + "x")).is_err());
         let payload = serde_json::json!({"selectedNodeIds":[]});
         let encrypted = crypto

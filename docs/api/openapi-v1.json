@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "sndbox Control Plane API",
-    "version": "0.5.0",
-    "description": "Versioned v1 route and transport contract. Resource schemas remain additive during the v0.5 GA candidate."
+    "version": "0.8.0",
+    "description": "Versioned v1 route and transport contract for sndbox 8. Resource schemas remain additive within v1."
   },
   "servers": [
     {
@@ -9723,6 +9723,604 @@
         }
       }
     },
+    "/v1/workspaces/{workspaceId}/workflows/{workflowId}/collaboration/sessions": {
+      "post": {
+        "operationId": "post_v1_workspaces_workspaceId_workflows_workflowId_collaboration_sessions",
+        "tags": [
+          "workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "x-sandbox-stability": "stable",
+        "x-sandbox-idempotency": "supported",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "x-correlation-id": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "idempotency-replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationSessionEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "404": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ApiError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollaborationSessionJoinInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{workspaceId}/workflows/{workflowId}/collaboration/sessions/{sessionId}/members/{deviceId}": {
+      "delete": {
+        "operationId": "delete_v1_workspaces_workspaceId_workflows_workflowId_collaboration_sessions_sessionId_members_deviceId",
+        "tags": [
+          "workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "x-sandbox-stability": "stable",
+        "x-sandbox-idempotency": "supported",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "x-correlation-id": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "idempotency-replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationLeaveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "404": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ApiError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteV1WorkspacesWorkspaceIdWorkflowsWorkflowIdCollaborationSessionsSessionIdMembersDeviceIdInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{workspaceId}/workflows/{workflowId}/collaboration/sessions/{sessionId}/operations": {
+      "get": {
+        "operationId": "get_v1_workspaces_workspaceId_workflows_workflowId_collaboration_sessions_sessionId_operations",
+        "tags": [
+          "workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Return operations after this server sequence."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "x-sandbox-stability": "stable",
+        "x-sandbox-idempotency": "not-applicable",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "x-correlation-id": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "idempotency-replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationOperationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "404": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ApiError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_v1_workspaces_workspaceId_workflows_workflowId_collaboration_sessions_sessionId_operations",
+        "tags": [
+          "workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "x-sandbox-stability": "stable",
+        "x-sandbox-idempotency": "supported",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "x-correlation-id": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "idempotency-replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationOperationEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "404": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ApiError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollaborationOperationInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{workspaceId}/workflows/{workflowId}/collaboration/sessions/{sessionId}/presence": {
+      "get": {
+        "operationId": "get_v1_workspaces_workspaceId_workflows_workflowId_collaboration_sessions_sessionId_presence",
+        "tags": [
+          "workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          }
+        ],
+        "x-sandbox-stability": "stable",
+        "x-sandbox-idempotency": "not-applicable",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "x-correlation-id": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "idempotency-replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationPresencePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "404": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ApiError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_v1_workspaces_workspaceId_workflows_workflowId_collaboration_sessions_sessionId_presence",
+        "tags": [
+          "workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "x-sandbox-stability": "stable",
+        "x-sandbox-idempotency": "supported",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "x-correlation-id": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "idempotency-replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationPresenceHeartbeatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "404": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "409": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ApiError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ApiError"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollaborationPresenceInput"
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/workspaces/{workspaceId}/workflows/{workflowId}/revisions/{revisionId}/publish": {
       "post": {
         "operationId": "post_v1_workspaces_workspaceId_workflows_workflowId_revisions_revisionId_publish",
@@ -11494,6 +12092,321 @@
         },
         "additionalProperties": false
       },
+      "CollaborationSessionJoinInput": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "color"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[a-fA-F0-9]{6}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationSession": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "workspaceId",
+          "workflowId",
+          "latestSequence",
+          "joinedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workflowId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "latestSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationSessionEnvelope": {
+        "type": "object",
+        "required": [
+          "session"
+        ],
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/CollaborationSession"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationOperationInput": {
+        "type": "object",
+        "required": [
+          "operationId",
+          "baseSequence",
+          "clientSequence",
+          "encryptedPayload",
+          "payloadHash",
+          "createdAt"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "baseSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "clientSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "encryptedPayload": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "minLength": 20,
+            "maxLength": 1500000
+          },
+          "payloadHash": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationOperation": {
+        "type": "object",
+        "required": [
+          "operationId",
+          "baseSequence",
+          "clientSequence",
+          "encryptedPayload",
+          "payloadHash",
+          "createdAt",
+          "sessionId",
+          "workflowId",
+          "actorAccountId",
+          "sequence",
+          "acceptedAt"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "baseSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "clientSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "encryptedPayload": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "minLength": 20,
+            "maxLength": 1500000
+          },
+          "payloadHash": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workflowId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorAccountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "acceptedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationOperationEnvelope": {
+        "type": "object",
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/CollaborationOperation"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationOperationPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "latestSequence"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CollaborationOperation"
+            }
+          },
+          "latestSequence": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationPresenceInput": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "color",
+          "encryptedPresence"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[a-fA-F0-9]{6}$"
+          },
+          "encryptedPresence": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "minLength": 20,
+            "maxLength": 16384
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationPresence": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "color",
+          "encryptedPresence",
+          "accountId",
+          "displayName",
+          "lastSeenAt"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[a-fA-F0-9]{6}$"
+          },
+          "encryptedPresence": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "minLength": 20,
+            "maxLength": 16384
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationPresenceHeartbeatResponse": {
+        "type": "object",
+        "required": [
+          "updated"
+        ],
+        "properties": {
+          "updated": {
+            "const": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationPresencePage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollaborationPresence"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "CollaborationLeaveResponse": {
+        "type": "object",
+        "required": [
+          "left"
+        ],
+        "properties": {
+          "left": {
+            "const": true
+          }
+        },
+        "additionalProperties": false
+      },
       "MarketplacePage": {
         "type": "object",
         "required": [
@@ -12597,6 +13510,14 @@
           }
         ],
         "description": "Successful response for POST /v1/workspaces/{workspaceId}/sync/workflows/{workflowId}/conflicts/resolve."
+      },
+      "DeleteV1WorkspacesWorkspaceIdWorkflowsWorkflowIdCollaborationSessionsSessionIdMembersDeviceIdInput": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiObject"
+          }
+        ],
+        "description": "Request body for DELETE /v1/workspaces/{workspaceId}/workflows/{workflowId}/collaboration/sessions/{sessionId}/members/{deviceId}."
       },
       "PostV1WorkspacesWorkspaceIdWorkflowsWorkflowIdRevisionsRevisionIdRequestApprovalInput": {
         "allOf": [

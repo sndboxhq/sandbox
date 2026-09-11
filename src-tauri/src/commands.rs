@@ -1,5 +1,10 @@
 use crate::{
-    account_auth, marketplace, oauth,
+    account_auth,
+    collaboration::{
+        CollaborationSession, DecryptedCollaborationOperation, DecryptedCollaborationPresence,
+        EncryptedCollaborationOperation, EncryptedCollaborationPresence,
+    },
+    marketplace, oauth,
     plugin_manager::{PackageTrustMetadata, PluginPackageInspection},
     sync_crypto::EncryptedWorkflowRevision,
     templates, AppState,
@@ -73,6 +78,20 @@ pub struct CloudWorkflow {
 pub struct CloudSyncResult {
     pub revision: EncryptedWorkflowRevision,
     pub conflict_revision_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollaborationSessionHandle {
+    pub session: CollaborationSession,
+    pub invite_code: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollaborationOperationPage {
+    pub items: Vec<DecryptedCollaborationOperation>,
+    pub latest_sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -371,6 +390,39 @@ pub fn prepare_workflow_sync(
     prepare_workflow_sync_revision(&id, parent_revision_id, editor_device_id, &state)
 }
 
+#[tauri::command]
+pub fn prepare_workflow_collaboration_snapshot(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Workflow> {
+    if !state
+        .credential_vault
+        .exists(account_auth::ACCOUNT_VAULT_ID)
+        .map_err(err)?
+    {
+        return Err("Sign in before sharing a workflow canvas.".into());
+    }
+    let workflow = state
+        .engine
+        .database()
+        .get_workflow(&id)
+        .map_err(err)?
+        .ok_or_else(|| "Workflow no longer exists.".to_string())?;
+    let mut definition = serde_json::to_value(workflow).map_err(err)?;
+    sanitize_export_definition(
+        &mut definition,
+        &state,
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )?;
+    if contains_secret_material(&definition) {
+        return Err("Canvas sharing stopped because the workflow definition contains secret-shaped material.".into());
+    }
+    serde_json::from_value(definition)
+        .map_err(|error| format!("The safe collaboration snapshot is invalid: {error}"))
+}
+
 fn prepare_workflow_sync_revision(
     id: &str,
     parent_revision_id: Option<String>,
@@ -520,6 +572,299 @@ pub async fn get_workspace_activity(
         None,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn start_workflow_collaboration(
+    workspace_id: String,
+    workflow_id: String,
+    device_id: String,
+    color: String,
+    state: State<'_, AppState>,
+) -> Result<CollaborationSessionHandle> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let device_id = checked_uuid(&device_id, "Device")?;
+    let color = checked_collaboration_color(&color)?;
+    let payload = control_plane_json(
+        &state,
+        Method::POST,
+        &format!("/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions"),
+        Some(json!({"deviceId":device_id,"color":color})),
+    )
+    .await?;
+    let session: CollaborationSession = serde_json::from_value(
+        payload
+            .get("session")
+            .cloned()
+            .ok_or_else(|| "The collaboration response did not contain a session.".to_string())?,
+    )
+    .map_err(|error| format!("The collaboration session response was invalid: {error}"))?;
+    if session.workspace_id != workspace_id || session.workflow_id != workflow_id {
+        return Err("The collaboration service returned a session for another workflow.".into());
+    }
+    let invite_code = state.collaboration_crypto.create_invite(
+        &workspace_id,
+        &workflow_id,
+        &session.session_id,
+    )?;
+    Ok(CollaborationSessionHandle {
+        session,
+        invite_code,
+    })
+}
+
+#[tauri::command]
+pub async fn join_workflow_collaboration(
+    invite_code: String,
+    device_id: String,
+    color: String,
+    state: State<'_, AppState>,
+) -> Result<CollaborationSessionHandle> {
+    let device_id = checked_uuid(&device_id, "Device")?;
+    let color = checked_collaboration_color(&color)?;
+    let invite = state
+        .collaboration_crypto
+        .inspect_invite(invite_code.trim())?;
+    let payload = control_plane_json(
+        &state,
+        Method::POST,
+        &format!(
+            "/v1/workspaces/{}/workflows/{}/collaboration/sessions",
+            invite.workspace_id, invite.workflow_id
+        ),
+        Some(json!({"sessionId":invite.session_id,"deviceId":device_id,"color":color})),
+    )
+    .await?;
+    let session: CollaborationSession = serde_json::from_value(
+        payload
+            .get("session")
+            .cloned()
+            .ok_or_else(|| "The collaboration response did not contain a session.".to_string())?,
+    )
+    .map_err(|error| format!("The collaboration session response was invalid: {error}"))?;
+    if session.workspace_id != invite.workspace_id
+        || session.workflow_id != invite.workflow_id
+        || session.session_id != invite.session_id
+    {
+        return Err(
+            "The collaboration service returned a different session than the invite.".into(),
+        );
+    }
+    state.collaboration_crypto.accept_invite(&invite)?;
+    Ok(CollaborationSessionHandle {
+        session,
+        invite_code: invite_code.trim().to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn append_workflow_collaboration_operation(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    base_sequence: u64,
+    client_sequence: u64,
+    operation: Value,
+    state: State<'_, AppState>,
+) -> Result<DecryptedCollaborationOperation> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let operation_id = operation
+        .get("operationId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Collaboration operation ID is required.".to_string())?;
+    let operation_id = checked_uuid(operation_id, "Collaboration operation")?;
+    if operation.get("workflowId").and_then(Value::as_str) != Some(workflow_id.as_str())
+        || operation.get("baseSequence").and_then(Value::as_u64) != Some(base_sequence)
+        || operation
+            .get("changes")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    {
+        return Err("The collaboration operation does not match this workflow or sequence, or contains no changes.".into());
+    }
+    let created_at = operation
+        .get("createdAt")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Collaboration operation timestamp is required.".to_string())?;
+    let created_at = DateTime::parse_from_rfc3339(created_at)
+        .map_err(|_| "Collaboration operation timestamp is invalid.".to_string())?
+        .with_timezone(&Utc);
+    let (encrypted_payload, payload_hash) = state.collaboration_crypto.encrypt_operation(
+        &workspace_id,
+        &workflow_id,
+        &session_id,
+        &operation_id,
+        &operation,
+    )?;
+    let payload = control_plane_json(
+        &state,
+        Method::POST,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/operations"
+        ),
+        Some(json!({
+            "operationId":operation_id,
+            "baseSequence":base_sequence,
+            "clientSequence":client_sequence,
+            "encryptedPayload":encrypted_payload,
+            "payloadHash":payload_hash,
+            "createdAt":created_at,
+        })),
+    )
+    .await?;
+    let encrypted: EncryptedCollaborationOperation =
+        serde_json::from_value(payload.get("operation").cloned().ok_or_else(|| {
+            "The collaboration response did not contain an operation.".to_string()
+        })?)
+        .map_err(|error| format!("The collaboration operation response was invalid: {error}"))?;
+    state.collaboration_crypto.decrypt_operation(
+        &workspace_id,
+        &workflow_id,
+        &session_id,
+        encrypted,
+    )
+}
+
+#[tauri::command]
+pub async fn poll_workflow_collaboration_operations(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    after: u64,
+    state: State<'_, AppState>,
+) -> Result<CollaborationOperationPage> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let payload = control_plane_json(
+        &state,
+        Method::GET,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/operations?after={after}&limit=50"
+        ),
+        None,
+    )
+    .await?;
+    let latest_sequence = payload
+        .get("latestSequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "The collaboration operation page is missing its sequence.".to_string())?;
+    let encrypted: Vec<EncryptedCollaborationOperation> = serde_json::from_value(
+        payload
+            .get("items")
+            .cloned()
+            .ok_or_else(|| "The collaboration operation page is missing its items.".to_string())?,
+    )
+    .map_err(|error| format!("The collaboration operation page was invalid: {error}"))?;
+    let items = encrypted
+        .into_iter()
+        .map(|operation| {
+            state.collaboration_crypto.decrypt_operation(
+                &workspace_id,
+                &workflow_id,
+                &session_id,
+                operation,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(CollaborationOperationPage {
+        items,
+        latest_sequence,
+    })
+}
+
+#[tauri::command]
+pub async fn update_workflow_collaboration_presence(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    device_id: String,
+    color: String,
+    presence: Value,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let device_id = checked_uuid(&device_id, "Device")?;
+    let color = checked_collaboration_color(&color)?;
+    let encrypted_presence = state.collaboration_crypto.encrypt_presence(
+        &workflow_id,
+        &session_id,
+        &device_id,
+        &presence,
+    )?;
+    control_plane_json(
+        &state,
+        Method::PUT,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/presence"
+        ),
+        Some(json!({"deviceId":device_id,"color":color,"encryptedPresence":encrypted_presence})),
+    )
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn list_workflow_collaboration_presence(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<DecryptedCollaborationPresence>> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let payload = control_plane_json(
+        &state,
+        Method::GET,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/presence"
+        ),
+        None,
+    )
+    .await?;
+    let encrypted: Vec<EncryptedCollaborationPresence> =
+        serde_json::from_value(payload.get("items").cloned().ok_or_else(|| {
+            "The collaboration presence response is missing its items.".to_string()
+        })?)
+        .map_err(|error| format!("The collaboration presence response was invalid: {error}"))?;
+    encrypted
+        .into_iter()
+        .map(|presence| {
+            state
+                .collaboration_crypto
+                .decrypt_presence(&workflow_id, &session_id, presence)
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn leave_workflow_collaboration(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    device_id: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let device_id = checked_uuid(&device_id, "Device")?;
+    control_plane_json(
+        &state,
+        Method::DELETE,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/members/{device_id}"
+        ),
+        None,
+    )
+    .await?;
+    state.collaboration_crypto.forget_session(&session_id)
 }
 
 #[tauri::command]
@@ -804,6 +1149,45 @@ pub fn save_workflow(workflow: Workflow, state: State<'_, AppState>) -> Result<W
         return Err("Workflow name and identifier are required.".into());
     }
     state.engine.database().save_workflow(workflow).map_err(err)
+}
+
+#[tauri::command]
+pub fn save_collaboration_bootstrap(
+    mut workflow: Workflow,
+    state: State<'_, AppState>,
+) -> Result<Workflow> {
+    checked_uuid(&workflow.id, "Workflow")?;
+    if workflow.name.trim().is_empty() {
+        return Err("The shared workflow name is required.".into());
+    }
+    workflow.enabled = false;
+    workflow.settings.permissions = PermissionSummary::default();
+    for node in &workflow.nodes {
+        if node.node_type == "custom_function" {
+            state
+                .engine
+                .database()
+                .clear_custom_node_verification(&workflow.id, &node.id)
+                .map_err(err)?;
+        }
+    }
+    let saved = state
+        .engine
+        .database()
+        .save_workflow(workflow)
+        .map_err(err)?;
+    state
+        .engine
+        .database()
+        .update_workflow_metadata(
+            &saved.id,
+            WorkflowMetadataPatch {
+                archived_at: Some(None),
+                ..Default::default()
+            },
+        )
+        .map_err(err)?;
+    Ok(saved)
 }
 #[tauri::command]
 pub fn list_workflow_revisions(
@@ -2513,6 +2897,16 @@ fn checked_uuid(value: &str, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} ID must be a UUID."))
 }
 
+fn checked_collaboration_color(value: &str) -> Result<String> {
+    if value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Ok(value.to_ascii_lowercase());
+    }
+    Err("Collaboration color must be a six-digit hexadecimal color.".into())
+}
+
 async fn control_plane_json(
     state: &AppState,
     method: Method,
@@ -2568,7 +2962,9 @@ async fn control_plane_json(
         .header("accept", "application/json")
         .header("x-correlation-id", Uuid::new_v4().to_string());
     if method != Method::GET && method != Method::HEAD {
-        request = request.header("x-idempotency-key", Uuid::new_v4().to_string());
+        request = request
+            .header("idempotency-key", Uuid::new_v4().to_string())
+            .header("x-sandbox-request-time", Utc::now().to_rfc3339());
     }
     if let Some(body) = body {
         request = request.json(&body);
@@ -3325,6 +3721,18 @@ fn sanitize_export_definition(
             .and_then(Value::as_str)
             .unwrap_or("unknown-node")
             .to_string();
+        if let Some(bindings) = node.get_mut("inputBindings").and_then(Value::as_object_mut) {
+            for binding in bindings.values_mut() {
+                if binding.get("kind").and_then(Value::as_str) == Some("connection") {
+                    if let Some(object) = binding.as_object_mut() {
+                        object.insert("connectionId".into(), Value::String(String::new()));
+                    }
+                }
+            }
+        }
+        if let Some(plugin) = node.get_mut("plugin").and_then(Value::as_object_mut) {
+            plugin.insert("credentialReferences".into(), json!({}));
+        }
         let connection_field = if node.get("type").and_then(Value::as_str) == Some("ai_prompt") {
             "connectionId"
         } else {
@@ -3416,11 +3824,13 @@ fn sanitize_export_definition(
         .and_then(Value::as_object_mut)
     {
         permissions.insert("approvedFolders".into(), json!([]));
+        permissions.insert("approvedNetworkDomains".into(), json!([]));
         permissions.insert("approvedBrowserProfileIds".into(), json!([]));
         permissions.insert("commandExecutionPermitted".into(), Value::Bool(false));
         permissions.insert("backgroundExecutionPermitted".into(), Value::Bool(false));
         permissions.insert("browserAutomationPermitted".into(), Value::Bool(false));
         permissions.insert("externalCommunicationPermitted".into(), Value::Bool(false));
+        permissions.insert("externalDataWritePermitted".into(), Value::Bool(false));
         permissions.insert("approvalRevision".into(), Value::Null);
         permissions.insert("communicationApprovalRevision".into(), Value::Null);
         permissions.insert("approvedEnvironmentVariables".into(), json!([]));

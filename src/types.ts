@@ -34,6 +34,7 @@ export interface CollectionLimits { maxInputItems:number; maxResultItems:number;
 export interface WorkflowSettings { defaultNodeTimeoutMs:number; maxConcurrentNodes:number; permissions:PermissionSummary; expressionLanguageVersion?:number; collectionLimits?:CollectionLimits }
 export interface Workflow { id:string; schemaVersion:number; owner?:WorkflowOwner; name:string; description:string; enabled:boolean; triggerNodeId:string; nodes:WorkflowNode[]; edges:WorkflowEdge[]; settings:WorkflowSettings; createdAt:string; updatedAt:string }
 export type WorkflowCollaborationChange =
+  | { kind:"workflow_snapshot"; workflow:Omit<Workflow,"enabled"|"settings"> & {settings:Omit<WorkflowSettings,"permissions">} }
   | { kind:"node_add"; node:WorkflowNode }
   | { kind:"node_update"; node:WorkflowNode }
   | { kind:"node_move"; nodeId:string; position:Position }
@@ -43,6 +44,12 @@ export type WorkflowCollaborationChange =
   | { kind:"edge_remove"; edgeId:string }
   | { kind:"workflow_update"; name:string; description:string; triggerNodeId:string; settings:Omit<WorkflowSettings,"permissions"> };
 export interface WorkflowCollaborationOperation { operationId:string; workflowId:string; actorId:string; baseSequence:number; createdAt:string; changes:WorkflowCollaborationChange[] }
+export interface CollaborationSession { sessionId:string; workspaceId:string; workflowId:string; latestSequence:number; joinedAt:string; expiresAt:string }
+export interface CollaborationSessionHandle { session:CollaborationSession; inviteCode:string }
+export interface DecryptedCollaborationOperation { sessionId:string; sequence:number; operationId:string; workflowId:string; actorAccountId:string; baseSequence:number; clientSequence:number; payload:WorkflowCollaborationOperation; createdAt:string; acceptedAt:string }
+export interface CollaborationOperationPage { items:DecryptedCollaborationOperation[]; latestSequence:number }
+export interface WorkflowCollaborationPresenceState { selectedNodeIds:string[]; cursor?:Position; viewport?:{x:number;y:number;zoom:number} }
+export interface DecryptedCollaborationPresence { accountId:string; deviceId:string; displayName:string; color:string; payload:WorkflowCollaborationPresenceState; lastSeenAt:string }
 export interface ExecutionError { code:string; message:string; detail?:string; suggestion?:string; line?:number; column?:number }
 export interface BinaryReference { reference:string; fileName?:string; contentType?:string; sizeBytes?:number; sha256?:string }
 export interface WorkflowItem { itemId?:string; originItemId?:string; parentItemId?:string; data:unknown; binary?:Record<string,BinaryReference>; sourceNodeId?:string; sourceItemIndex?:number; originalPosition?:number; currentPosition?:number; branch?:string; branchHistory?:string[]; loopIteration?:number; executionAttempt?:number; status?:"successful"|"filtered"|"removed"|"failed"|"retried"|"skipped"; trustedPaths?:Record<string,string>; correlations?:Record<string,string> }

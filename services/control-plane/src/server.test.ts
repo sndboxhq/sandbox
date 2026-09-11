@@ -224,7 +224,16 @@ describe("control-plane API", () => {
     expect(limited.statusCode,limited.body).toBe(429);expect(limited.headers["retry-after"]).toBeTruthy();expect(limited.json()).toMatchObject({error:{code:"rate_limit_exceeded"},correlationId:expect.any(String)});
     const contract=await server.inject({method:"GET",url:"/v1/openapi.json"});
     expect(contract.statusCode,contract.body).toBe(200);
-    expect(contract.json()).toMatchObject({openapi:"3.1.0",info:{version:"0.5.0"},paths:{"/v1/personal-access-tokens":{get:expect.any(Object),post:expect.any(Object)}}});
+    expect(contract.json()).toMatchObject({
+      openapi:"3.1.0",
+      info:{version:"0.8.0"},
+      paths:{
+        "/v1/personal-access-tokens":{get:expect.any(Object),post:expect.any(Object)},
+        "/v1/workspaces/{workspaceId}/workflows/{workflowId}/collaboration/sessions":{post:{requestBody:{required:true,content:{"application/json":{schema:{$ref:"#/components/schemas/CollaborationSessionJoinInput"}}}}}},
+        "/v1/workspaces/{workspaceId}/workflows/{workflowId}/collaboration/sessions/{sessionId}/operations":{get:{parameters:expect.arrayContaining([expect.objectContaining({name:"after"}),expect.objectContaining({name:"limit"})])}},
+      },
+      components:{schemas:{CollaborationOperation:expect.any(Object),CollaborationPresence:expect.any(Object)}},
+    });
     await server.close();
   });
 

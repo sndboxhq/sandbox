@@ -70,9 +70,9 @@ export class PostgresCollaborationService implements CollaborationService {
     try {
       await client.query("BEGIN");
       await requireActiveSession(client, actor, workspaceId, workflowId, sessionId);
+      const session = await client.query<{ latest_sequence: string }>(`SELECT latest_sequence FROM workflow_collaboration_sessions WHERE id=$1 FOR UPDATE`, [sessionId]);
       const duplicate = await client.query<OperationRow>(operationSelect("session_id=$1 AND operation_id=$2"), [sessionId, input.operationId]);
       if (duplicate.rowCount) { await client.query("COMMIT"); return operationFromRow(duplicate.rows[0]); }
-      const session = await client.query<{ latest_sequence: string }>(`SELECT latest_sequence FROM workflow_collaboration_sessions WHERE id=$1 FOR UPDATE`, [sessionId]);
       const latest = Number(session.rows[0].latest_sequence);
       if (input.baseSequence > latest) throw new DomainError("collaboration_base_ahead", "The operation base is newer than the collaboration session.", 409);
       const sequence = latest + 1;
@@ -96,7 +96,7 @@ export class PostgresCollaborationService implements CollaborationService {
   async operations(actor: AuthenticatedSession, workspaceId: string, workflowId: string, sessionId: string, after: number, limit: number) {
     const client = await this.pool.connect();
     try {
-      await requireActiveSession(client, actor, workspaceId, workflowId, sessionId, false);
+      await requireActiveSession(client, actor, workspaceId, workflowId, sessionId);
       const result = await client.query<OperationRow>(operationSelect("session_id=$1 AND sequence>$2") + " ORDER BY sequence ASC LIMIT $3", [sessionId, after, limit]);
       const session = await client.query<{ latest_sequence: string }>(`SELECT latest_sequence FROM workflow_collaboration_sessions WHERE id=$1`, [sessionId]);
       return { items: result.rows.map(operationFromRow), latestSequence: Number(session.rows[0].latest_sequence) };
@@ -123,7 +123,7 @@ export class PostgresCollaborationService implements CollaborationService {
   async presence(actor: AuthenticatedSession, workspaceId: string, workflowId: string, sessionId: string): Promise<CollaborationPresence[]> {
     const client = await this.pool.connect();
     try {
-      await requireActiveSession(client, actor, workspaceId, workflowId, sessionId, false);
+      await requireActiveSession(client, actor, workspaceId, workflowId, sessionId);
       const result = await client.query<{ account_id: string; device_id: string; display_name: string; color: string; encrypted_presence: string; last_seen_at: Date }>(
         `SELECT member.account_id,member.device_id,account.display_name,member.color,encode(member.encrypted_presence,'base64') AS encrypted_presence,member.last_seen_at
            FROM workflow_collaboration_members member JOIN accounts account ON account.id=member.account_id
@@ -140,7 +140,7 @@ export class PostgresCollaborationService implements CollaborationService {
   async leave(actor: AuthenticatedSession, workspaceId: string, workflowId: string, sessionId: string, deviceId: string): Promise<void> {
     const client = await this.pool.connect();
     try {
-      await requireActiveSession(client, actor, workspaceId, workflowId, sessionId, false);
+      await requireActiveSession(client, actor, workspaceId, workflowId, sessionId);
       await client.query(`DELETE FROM workflow_collaboration_members WHERE session_id=$1 AND account_id=$2 AND device_id=$3`, [sessionId, actor.accountId, deviceId]);
     } finally {
       client.release();

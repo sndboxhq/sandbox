@@ -1,5 +1,5 @@
 import {describe,expect,it} from "vitest";
-import {completeCommand,parseCommand,resolveTarget,tokenizeCommand} from "./commandShell";
+import {completeCommand,parseCommand,resolveTarget,shouldPersistCommand,tokenizeCommand} from "./commandShell";
 
 describe("sndbox command shell",()=>{
   it("tokenizes quoted arguments and flags",()=>expect(parseCommand('workflow create "Nightly report" --template blank')).toMatchObject({path:"workflow create",args:["Nightly report"],flags:{template:"blank"}}));
@@ -8,4 +8,5 @@ describe("sndbox command shell",()=>{
   it("completes contextually",()=>expect(completeCommand("workflow v")).toEqual(["workflow validate"]));
   it("resolves ids, prefixes, and names",()=>{const values=[{id:"abc123",name:"One"},{id:"def456",name:"Two"}];expect(resolveTarget("abc123",values).name).toBe("One");expect(resolveTarget("def",values).name).toBe("Two");expect(resolveTarget("one",values).id).toBe("abc123")});
   it("reports ambiguity",()=>expect(()=>resolveTarget("a",[{id:"abc",name:"A"},{id:"abd",name:"B"}])).toThrow(/Ambiguous/));
+  it("never persists end-to-end encryption invite codes",()=>expect(shouldPersistCommand(parseCommand("workflow join sndbox-collab-v1.private"))).toBe(false));
 });
