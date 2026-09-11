@@ -59,7 +59,7 @@ export const useCases = [
   {slug:"homelab-automation",title:"Automate services that never leave your private network",problem:"NAS devices, dashboards and home services are deliberately unreachable from hosted automation tools.",nodes:"Schedule → HTTP request → Condition → Discord webhook",target:"Raspberry Pi, NAS or Linux server",difficulty:"Intermediate",permissions:"Private network targets and Discord connection",result:"Local services are monitored from inside the network boundary."},
 ];
 
-export const launchRelease = { version:"0.7.10-beta.1", date:"Repository state", channel:"Beta", summary:"Current repository version. No public download artifact is attached to this source state.", availableArtifacts:[] as Array<{platform:string;architecture:string;url:string;size:string;checksum:string;signature:string}> };
+export const launchRelease = { version:"0.7.10-beta.2", date:"Repository state", channel:"Beta", summary:"Current repository version. No public download artifact is attached to this source state.", availableArtifacts:[] as Array<{platform:string;architecture:string;url:string;size:string;checksum:string;signature:string}> };
 
 export const legalPages = ["terms","privacy","cookies","acceptable-use","marketplace-terms","publisher-terms","data-processing-addendum","subprocessors","vulnerability-disclosure","refunds","accessibility","complaints"] as const;
 

@@ -31,7 +31,7 @@ export function DownloadsClient({ manifest }: { manifest?: ReleaseManifest }) {
       <h2>{available ? selected === "windows" ? "Desktop beta ready" : "Runner archive ready" : selected === "macos" ? "Not available in this beta" : "Release pending"}</h2>
       <p>{platform.detail}</p>
       <dl>
-        <div><dt>Release</dt><dd>{manifest ? `${manifest.version} ${manifest.channel}` : "0.7.10-beta.1 pending publication"}</dd></div>
+        <div><dt>Release</dt><dd>{manifest ? `${manifest.version} ${manifest.channel}` : "0.7.10-beta.2 pending publication"}</dd></div>
         <div><dt>Artifact</dt><dd>{artifact?.name ?? "No published artifact for this platform"}</dd></div>
         <div><dt>Checksum</dt><dd className="download-digest">{artifact?.sha256 ?? "Generated and validated during release"}</dd></div>
         <div><dt>Verification</dt><dd>{selected === "windows" ? unsignedWindowsBeta ? "Unsigned test build · SHA-256 checksum" : manifest ? "Authenticode signature + SHA-256 checksum" : "Declared in the published release" : "Sigstore bundle + SHA-256 checksum"}</dd></div>

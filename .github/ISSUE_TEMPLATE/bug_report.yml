@@ -12,7 +12,7 @@ body:
     attributes:
       label: sndbox version
       description: Use the version shown in the app or the exact commit SHA.
-      placeholder: 0.7.10-beta.1
+      placeholder: 0.7.10-beta.2
     validations:
       required: true
   - type: dropdown

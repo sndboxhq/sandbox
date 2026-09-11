@@ -18,7 +18,7 @@ export interface ReleaseManifest {
   artifacts: ReleaseArtifact[];
 }
 
-const defaultManifestUrl = "https://github.com/sndboxhq/sandbox/releases/download/v0.7.10-beta.1/release-manifest.json";
+const defaultManifestUrl = "https://github.com/sndboxhq/sandbox/releases/download/v0.7.10-beta.2/release-manifest.json";
 
 export async function loadReleaseManifest(): Promise<ReleaseManifest | undefined> {
   const url = process.env.SANDBOX_RELEASE_MANIFEST_URL ?? defaultManifestUrl;
