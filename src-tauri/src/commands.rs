@@ -18,8 +18,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::hash_map::Entry;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_autostart::ManagerExt as AutostartExt;
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
@@ -27,6 +29,7 @@ use uuid::Uuid;
 
 type Result<T> = std::result::Result<T, String>;
 const ACCOUNT_AUTH_CALLBACK_PORT: u16 = 53_682;
+const DESKTOP_INTEGRATION_KEY: &str = "desktop.integration.v1";
 
 fn err(error: impl std::fmt::Display) -> String {
     error.to_string()
@@ -90,6 +93,54 @@ pub struct CloudPublishResult {
     pub workflow_id: String,
     pub published_revision_id: String,
     pub previous_published_revision_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopIntegrationSettings {
+    pub shortcut: String,
+    pub shortcut_enabled: bool,
+    pub start_at_login: bool,
+    pub shortcut_error: Option<String>,
+}
+
+impl Default for DesktopIntegrationSettings {
+    fn default() -> Self { Self { shortcut: "Ctrl+Shift+Space".into(), shortcut_enabled: true, start_at_login: false, shortcut_error: None } }
+}
+
+pub fn show_quick_launcher(app: &AppHandle) -> std::result::Result<(), String> {
+    if let Some(window) = app.get_webview_window("quick-launcher") {
+        window.show().map_err(err)?; window.unminimize().map_err(err)?; window.set_focus().map_err(err)?; return Ok(());
+    }
+    WebviewWindowBuilder::new(app, "quick-launcher", WebviewUrl::App("index.html?window=quick-launcher".into()))
+        .title("sndbox quick launcher").inner_size(520.0,420.0).min_inner_size(420.0,320.0)
+        .resizable(true).decorations(true).always_on_top(true).build().map_err(err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_quick_launcher(app: AppHandle) -> Result<()> { show_quick_launcher(&app) }
+
+#[tauri::command]
+pub fn desktop_integration_settings(app: AppHandle, state: State<'_, AppState>) -> Result<DesktopIntegrationSettings> {
+    let mut settings=state.engine.database().get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY).map_err(err)?.unwrap_or_default();
+    settings.start_at_login=app.autolaunch().is_enabled().unwrap_or(settings.start_at_login);
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn set_desktop_integration_settings(next: DesktopIntegrationSettings, app: AppHandle, state: State<'_, AppState>) -> Result<DesktopIntegrationSettings> {
+    let previous=state.engine.database().get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY).map_err(err)?.unwrap_or_default();
+    if next.shortcut_enabled && (!previous.shortcut_enabled || next.shortcut != previous.shortcut) {
+        app.global_shortcut().register(next.shortcut.as_str()).map_err(|error| format!("Could not register '{}': {error}. The previous shortcut remains active.",next.shortcut))?;
+    }
+    if previous.shortcut_enabled && (!next.shortcut_enabled || next.shortcut != previous.shortcut) {
+        let _=app.global_shortcut().unregister(previous.shortcut.as_str());
+    }
+    if next.start_at_login { app.autolaunch().enable().map_err(err)?; } else { app.autolaunch().disable().map_err(err)?; }
+    let saved=DesktopIntegrationSettings{shortcut:next.shortcut.trim().to_string(),shortcut_enabled:next.shortcut_enabled,start_at_login:next.start_at_login,shortcut_error:None};
+    state.engine.database().set_setting(DESKTOP_INTEGRATION_KEY,&saved).map_err(err)?;
+    Ok(saved)
 }
 
 #[tauri::command]

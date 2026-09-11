@@ -266,7 +266,7 @@ impl Engine {
             .edges
             .iter()
             .map(|edge| {
-                let routed = workflow
+                let routed = edge.source_handle == "error" || workflow
                     .nodes
                     .iter()
                     .find(|n| n.id == edge.source_node_id)
