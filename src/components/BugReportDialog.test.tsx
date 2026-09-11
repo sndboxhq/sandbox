@@ -73,7 +73,7 @@ describe("BugReportDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send report" }));
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
     expect(submit.mock.calls[0][0]).toMatchObject({
-      diagnostics: { View: "editor", "App version": "v0.7.10-beta.2" },
+      diagnostics: { View: "editor", "App version": "v0.8.0-beta.1" },
     });
   });
 });

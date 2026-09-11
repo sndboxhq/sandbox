@@ -23,7 +23,7 @@ export function DownloadsClient({ manifest }: { manifest?: ReleaseManifest }) {
   const available = Boolean(artifact);
   const linuxRunner = selected === "linux-x64" || selected === "linux-arm64";
   const unsignedWindowsBeta = selected === "windows" && manifest?.channel === "beta";
-  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "v0.7.10-beta.2";
+  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "v0.8.0-beta.1";
   return <div className="download-picker">
     <nav aria-label="Platforms">{platforms.map(item => <button key={item.id} onClick={() => setSelected(item.id)} className={selected === item.id ? "active" : ""}>{item.name}</button>)}</nav>
     <section><div>

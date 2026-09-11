@@ -3303,7 +3303,7 @@ mod bug_report_tests {
         BugReportDraft {
             summary: "Web Builder preview stays blank".into(),
             description: "The localhost page opens, but no compiled content is displayed.".into(),
-            diagnostics: [("App version".into(), "0.7.10-beta.2".into())]
+            diagnostics: [("App version".into(), "0.8.0-beta.1".into())]
                 .into_iter()
                 .collect(),
         }
@@ -3318,7 +3318,7 @@ mod bug_report_tests {
             .as_str()
             .unwrap()
             .contains("localhost"));
-        assert_eq!(payload["diagnostics"]["App version"], "0.7.10-beta.2");
+        assert_eq!(payload["diagnostics"]["App version"], "0.8.0-beta.1");
     }
 
     #[test]

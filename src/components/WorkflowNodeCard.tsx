@@ -85,6 +85,7 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
 }
 
 function dynamicOutputPorts(node:WorkflowNode):Array<{id:string;label:string}>|undefined{
+  if((node.type==="code"||node.type==="javascript_code")&&node.configuration.executionMode==="source")return[{id:"code",label:"Source code"}];
   if(node.type==="custom_function")return [...(node.customization?.outputs.map(port=>({id:port.key,label:port.label}))??[]),...(node.customization?.branches.map(port=>({id:port.key,label:port.label}))??[]),...(node.errorPolicy?.strategy==="route"?[{id:"error",label:"Error"}]:[])];
   const error=node.errorPolicy?.strategy==="route"?[{id:"error",label:"Error"}]:[];
   if(node.type==="switch")return [

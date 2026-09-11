@@ -1138,7 +1138,7 @@ fn validate_collection_node(
         .iter()
         .filter(|edge| edge.target_node_id == node.id)
         .count();
-    if incoming > 1 && node.node_type != "merge" {
+    if incoming > 1 && !matches!(node.node_type.as_str(), "merge" | "web_builder" | "custom_function") {
         issues.push(issue("ambiguous_convergence",format!("{} has {incoming} incoming control branches. Add Merge to define convergence explicitly.",node.name),Some(node.id.clone()),None));
     }
 }
@@ -1540,6 +1540,12 @@ mod tests {
         assert!(validate(&converged)
             .iter()
             .any(|issue| issue.code == "ambiguous_convergence"));
+
+        let mut named_site = converged;
+        named_site.nodes[2].node_type = "web_builder".into();
+        assert!(!validate(&named_site)
+            .iter()
+            .any(|issue| issue.code == "ambiguous_convergence" && issue.node_id.as_deref() == Some("c")));
     }
 
     #[test]

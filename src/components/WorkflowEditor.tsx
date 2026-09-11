@@ -182,6 +182,7 @@ function workflowNodeHandles(node: WorkflowNode): Node<WorkflowNodeData>["handle
 }
 
 function workflowOutputHandles(node:WorkflowNode):string[]{
+  if((node.type==="code"||node.type==="javascript_code")&&node.configuration.executionMode==="source")return["code"];
   if(node.type==="custom_function")return [...(node.customization?.outputs.map(port=>port.key)??[]),...(node.customization?.branches.map(port=>port.key)??[]),...(node.errorPolicy?.strategy==="route"?["error"]:[])];
   const error=node.errorPolicy?.strategy==="route"?["error"]:[];
   if(node.type==="switch")return [...(((node.configuration.cases as Array<{id:string}>|undefined)??[]).map(item=>item.id)),String(node.configuration.fallbackBranchId??"fallback"),...error];

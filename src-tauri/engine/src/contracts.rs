@@ -148,9 +148,11 @@ pub fn node_contracts() -> Vec<NodeContract> {
     set_ports("remove_duplicates", vec![port("items","Items",ValueType::Array,true)], vec![port("output","Unique",ValueType::Array,false),port("duplicates","Duplicates",ValueType::Array,false)], &["output","duplicates"]);
     set_ports("set_data", vec![port("values","Object",ValueType::Object,false)], vec![port("value","Object",ValueType::Object,false)], &[]);
     set_ports("http_request", vec![port("url","URL",ValueType::String,true),port("body","Body",ValueType::Any,false)], vec![port("status","Status",ValueType::Number,false),port("body","Body",ValueType::Any,false),port("finalUrl","Final URL",ValueType::String,false)], &[]);
+    set_ports("code", vec![port("input","Input",ValueType::Any,false)], vec![port("code","Source code",ValueType::String,false),port("result","Result",ValueType::Any,false)], &[]);
     set_ports("javascript_code", vec![port("input","Input items",ValueType::Any,false)], vec![port("items","Output items",ValueType::Array,false),port("result","Result",ValueType::Any,false)], &[]);
     set_ports("python_code", vec![port("input","Input items",ValueType::Any,false)], vec![port("items","Output items",ValueType::Array,false),port("result","Result",ValueType::Any,false)], &[]);
     set_ports("custom_function", vec![], vec![], &[]);
+    set_ports("web_builder", vec![port("html","HTML",ValueType::String,true),port("javascript","JavaScript",ValueType::String,true),port("css","CSS",ValueType::String,true)], vec![port("url","Localhost URL",ValueType::String,false),port("port","Port",ValueType::Number,false),port("status","Server status",ValueType::String,false)], &[]);
 
     let browser: BTreeSet<&str> = ["open_browser","navigate","click_element","fill_field","select_option","press_key","wait_for","extract_data","screenshot","download_file","upload_file","close_browser"].into_iter().collect();
     let local_only: BTreeSet<&str> = ["ai_prompt","javascript_code","python_code","custom_function","web_builder"].into_iter().collect();

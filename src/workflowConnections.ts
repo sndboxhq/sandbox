@@ -81,7 +81,9 @@ export function isValidWorkflowConnection(
   }
   if (target.type === "custom_function") return !workflow.edges.some(edge=>edge.targetNodeId===target.id&&(edge.targetPort??edge.targetHandle)===targetHandle);
   if (target.type !== "web_builder") return targetHandle === "input";
-  if (!isWebBuilderInput(targetHandle) || source.type !== "code") return false;
+  const sourceMode = String(source.configuration.executionMode ?? "source");
+  const sourceNode = source.type === "code" || source.type === "javascript_code";
+  if (!isWebBuilderInput(targetHandle) || !sourceNode || sourceMode !== "source") return false;
 
   const input = WEB_BUILDER_INPUT_PORTS.find((port) => port.id === targetHandle)!;
   if (source.configuration.language !== input.language) return false;
