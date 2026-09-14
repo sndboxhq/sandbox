@@ -57,12 +57,21 @@
   align-items: end;
 }
 
+.leadArtworkLink {
+  min-width: 0;
+  display: block;
+}
+
 .leadArtwork {
   min-width: 0;
   margin: 0;
   border: 1px solid var(--line);
   background: var(--surface);
+  transition: border-color 180ms ease, transform 180ms ease;
 }
+
+.leadArtworkLink:hover .leadArtwork { border-color: #596257; transform: translateY(-3px); }
+.leadArtworkLink:focus-visible { border-radius: 2px; }
 
 .leadArtwork img {
   width: 100%;
@@ -77,11 +86,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 18px;
   color: var(--dim);
   font: 650 13px ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
 .leadArtwork figcaption span { color: var(--accent); }
+.leadArtwork figcaption time { margin-left: auto; }
+.leadArtwork figcaption strong { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font: inherit; }
+.leadArtworkLink:hover figcaption strong { color: var(--accent); }
 
 .leadCopy {
   padding-top: 22px;
@@ -296,5 +309,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .leadArtwork,
   .followThrough nav a { transition: none; }
 }

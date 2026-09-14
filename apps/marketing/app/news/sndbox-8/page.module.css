@@ -1,0 +1,128 @@
+.page { min-height: calc(100svh - 64px); overflow: hidden; background: var(--bg); }
+
+.articleHeader {
+  max-width: 1312px;
+  margin: 0 auto;
+  padding: clamp(92px, 10vw, 148px) 0 clamp(60px, 8vw, 104px);
+}
+
+.backLink {
+  min-height: 44px;
+  margin-bottom: clamp(58px, 8vw, 110px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.backLink:hover { color: var(--accent); }
+
+.articleMeta {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 26px;
+  color: var(--dim);
+  font: 650 13px ui-monospace, "SFMono-Regular", Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+}
+
+.articleMeta span:first-child { color: var(--accent); }
+
+.articleHeader h1 {
+  max-width: 1120px;
+  margin: clamp(48px, 7vw, 92px) 0 0;
+  font-size: clamp(66px, 10vw, 142px);
+  font-weight: 590;
+  letter-spacing: -0.08em;
+  line-height: 0.84;
+}
+
+.articleHeader > p {
+  max-width: 800px;
+  margin: 46px 0 0 auto;
+  color: var(--muted);
+  font-size: clamp(19px, 2vw, 27px);
+  line-height: 1.55;
+}
+
+.heroArtwork {
+  max-width: 1440px;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.heroArtwork img { width: 100%; height: auto; display: block; }
+.heroArtwork figcaption { padding: 16px 18px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; line-height: 1.5; }
+
+.articleLayout {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(90px, 11vw, 155px) 0 clamp(110px, 13vw, 185px);
+  display: grid;
+  grid-template-columns: 230px minmax(0, 720px);
+  justify-content: space-between;
+  gap: clamp(60px, 9vw, 130px);
+  align-items: start;
+}
+
+.articleLayout > aside {
+  position: sticky;
+  top: 94px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line);
+}
+
+.articleLayout > aside > strong { font-size: 14px; }
+.articleLayout > aside nav { margin-top: 22px; display: grid; }
+.articleLayout > aside a { padding: 10px 0; display: grid; grid-template-columns: 30px 1fr; gap: 9px; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.articleLayout > aside a span { color: var(--dim); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.articleLayout > aside a:hover { color: var(--accent); }
+
+.articleCopy { min-width: 0; }
+.intro { margin: 0; color: var(--text); font-size: clamp(22px, 2.5vw, 31px); line-height: 1.55; letter-spacing: -0.025em; }
+.articleCopy section { padding: clamp(74px, 9vw, 112px) 0 0; scroll-margin-top: 86px; }
+.articleCopy section + section { margin-top: clamp(74px, 9vw, 112px); border-top: 1px solid var(--line); }
+
+.sectionNumber {
+  margin: 0 0 28px !important;
+  color: var(--accent) !important;
+  font: 650 13px ui-monospace, "SFMono-Regular", Consolas, monospace !important;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+}
+
+.articleCopy h2 { margin: 0 0 30px; font-size: clamp(38px, 5vw, 64px); font-weight: 590; letter-spacing: -0.06em; line-height: 0.98; }
+.articleCopy section > p:not(.sectionNumber) { margin: 0 0 22px; color: var(--muted); font-size: 17px; line-height: 1.78; }
+.articleCopy blockquote { margin: 38px 0; padding: 26px 28px; border-left: 2px solid var(--accent); background: var(--surface); color: #c9cec8; font-size: 18px; line-height: 1.7; }
+
+.articleActions { margin-top: 36px; display: flex; flex-wrap: wrap; gap: 12px 26px; }
+.articleActions a { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: 14px; font-weight: 680; }
+.articleActions a + a { color: var(--text); }
+.articleActions a:hover { text-decoration: underline; text-underline-offset: 5px; }
+
+@media (max-width: 1360px) {
+  .articleHeader,
+  .articleLayout { margin-right: clamp(20px, 4.5vw, 64px); margin-left: clamp(20px, 4.5vw, 64px); }
+  .heroArtwork { margin-right: clamp(20px, 3vw, 42px); margin-left: clamp(20px, 3vw, 42px); }
+}
+
+@media (max-width: 820px) {
+  .articleHeader > p { margin-left: 0; }
+  .articleLayout { grid-template-columns: 1fr; gap: 70px; }
+  .articleLayout > aside { position: static; }
+  .articleLayout > aside nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+}
+
+@media (max-width: 560px) {
+  .articleHeader,
+  .articleLayout { margin-right: 16px; margin-left: 16px; }
+  .heroArtwork { margin-right: 0; margin-left: 0; border-right: 0; border-left: 0; }
+  .articleLayout > aside nav { grid-template-columns: 1fr; }
+  .articleCopy blockquote { padding: 22px 20px; }
+}

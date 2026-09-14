@@ -13,6 +13,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/pricing",
     "/downloads",
     "/news",
+    "/news/sndbox-8",
     "/changelog",
     "/security",
     "/enterprise",

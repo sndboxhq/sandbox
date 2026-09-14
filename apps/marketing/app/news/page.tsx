@@ -83,20 +83,27 @@ export default function NewsPage() {
       </header>
 
       <article className={styles.leadStory} aria-labelledby="lead-story-title">
-        <figure className={styles.leadArtwork}>
-          <Image
-            src="/brand/version-8-welcome-v2.png"
-            alt="Welcome to sndbox 8, the power-user release, over a connected workflow diagram."
-            width={1672}
-            height={941}
-            sizes="(max-width: 820px) 100vw, 62vw"
-            priority
-          />
-          <figcaption>
-            <span>Featured</span>
-            <time dateTime="2026-09-11">11 Sep 2026</time>
-          </figcaption>
-        </figure>
+        <Link
+          className={styles.leadArtworkLink}
+          href="/news/sndbox-8"
+          aria-label="Read the featured story: sndbox 8 is taking shape"
+        >
+          <figure className={styles.leadArtwork}>
+            <Image
+              src="/brand/version-8-welcome-v2.png"
+              alt="Welcome to sndbox 8, the power-user release, over a connected workflow diagram."
+              width={1672}
+              height={941}
+              sizes="(max-width: 820px) 100vw, 62vw"
+              priority
+            />
+            <figcaption>
+              <span>Featured</span>
+              <time dateTime="2026-09-11">11 Sep 2026</time>
+              <strong>Read story <ArrowRight aria-hidden="true" size={14} /></strong>
+            </figcaption>
+          </figure>
+        </Link>
         <div className={styles.leadCopy}>
           <p className={styles.storyType}>Desktop beta · v0.8.0-beta.1</p>
           <h2 id="lead-story-title">sndbox 8 is taking shape.</h2>
@@ -111,7 +118,8 @@ export default function NewsPage() {
             directly so an unfinished build is never presented as a release.
           </p>
           <div className={styles.leadActions}>
-            <Link href="/changelog">Read the technical changelog <ArrowRight aria-hidden="true" size={15} /></Link>
+            <Link href="/news/sndbox-8">Read the story <ArrowRight aria-hidden="true" size={15} /></Link>
+            <Link href="/changelog">Technical changelog <ArrowRight aria-hidden="true" size={15} /></Link>
             <Link href="/downloads">Check available builds <ArrowUpRight aria-hidden="true" size={14} /></Link>
           </div>
         </div>
