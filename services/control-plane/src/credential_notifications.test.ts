@@ -34,5 +34,6 @@ describe("credential expiry notification sweep",()=>{
     const notifier=new PostgresCredentialExpiryNotifier(pool(query),{sendInvitation:async()=>undefined,sendCredentialExpiry:async()=>{throw new Error("provider unavailable");}});
     await expect(notifier.runOnce(new Date("2026-08-29T00:00:00.000Z"))).resolves.toEqual({enqueued:0,sent:0,failed:1});
     expect(query).toHaveBeenCalledWith(expect.stringContaining("SET status='failed'"),expect.arrayContaining([delivery.id,"provider unavailable"]));
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("$3::timestamptz+"),expect.any(Array));
   });
 });

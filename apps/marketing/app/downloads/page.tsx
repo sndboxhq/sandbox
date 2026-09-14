@@ -1,10 +1,48 @@
+import { CheckCircle2, LockKeyhole, RefreshCw } from "lucide-react";
 import { loadReleaseManifest } from "../../lib/release-manifest";
 import { DownloadsClient } from "./DownloadsClient";
+import styles from "./downloads.module.css";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Downloads", description: "sndbox desktop and runner downloads with versions, requirements, checksums and signatures." };
+export const metadata = {
+  title: "Downloads",
+  description: "Download sndbox for Windows or install a Linux runner, with release checksums and verification details.",
+  alternates: { canonical: "/downloads" },
+};
 
 export default async function Page() {
   const manifest = await loadReleaseManifest();
-  return <main id="content" className="index-page downloads-page"><header><p className="eyebrow"><span/>Downloads</p><h1>Install the right build.<br/>Verify what you run.</h1><p>Download the Windows desktop beta or pair a lightweight Linux runner. Every published file includes a SHA-256 digest and release provenance.</p></header><DownloadsClient manifest={manifest}/></main>;
+  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "v0.7.10-beta.2";
+
+  return (
+    <main id="content" className={styles.page}>
+      <section className={styles.hero} aria-labelledby="downloads-title">
+        <div className={styles.heroCopy}>
+          <p className={styles.eyebrow}><span aria-hidden="true" /> Downloads</p>
+          <h1 id="downloads-title">Run sndbox<br />on your terms.</h1>
+          <p className={styles.lede}>
+            Build and run workflows on Windows, or keep scheduled work moving
+            with a lightweight Linux runner on infrastructure you control.
+          </p>
+        </div>
+
+        <aside className={styles.releaseCard} aria-label="Current release status">
+          <div className={styles.releaseCardTop}>
+            <div>
+              <span>Current release</span>
+              <strong>{releaseLabel}</strong>
+            </div>
+            <span className={styles.channel}>{manifest?.channel ?? "beta"}</span>
+          </div>
+          <div className={styles.releaseGrid}>
+            <p><CheckCircle2 aria-hidden="true" size={16} /><span><strong>{manifest ? "Manifest published" : "Release pending"}</strong>Versioned release record</span></p>
+            <p><LockKeyhole aria-hidden="true" size={16} /><span><strong>Checksums included</strong>SHA-256 for every file</span></p>
+            <p><RefreshCw aria-hidden="true" size={16} /><span><strong>Update in place</strong>Your workflows stay local</span></p>
+          </div>
+        </aside>
+      </section>
+
+      <DownloadsClient manifest={manifest} />
+    </main>
+  );
 }
