@@ -12,7 +12,7 @@ export const metadata = {
 
 export default async function Page() {
   const manifest = await loadReleaseManifest();
-  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "v0.7.10-beta.2";
+  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "Release pending";
 
   return (
     <main id="content" className={styles.page}>

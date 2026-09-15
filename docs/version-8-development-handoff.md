@@ -15,7 +15,7 @@ The canonical development branch is `feat/version-8-development`. Do not resume 
 
 ## Current release state
 
-- Product version is `0.8.0-beta.2`; workflow schema is 7 and export format remains 1.
+- Product version is `8.0.0-beta.1`; workflow schema is 7 and export format remains 1.
 - The desktop command surface is a docked, resizable sndbox-only console. The editor node picker remains on `A`.
 - The Rust engine owns the node contract registry, gate states, placement rules, retry safety, and generated frontend contract snapshot.
 - Custom `ƒx` nodes use a full-page JavaScript/Python editor, restricted runtimes, fixtures, coverage, SHA-256 verification receipts, and local-desktop placement.

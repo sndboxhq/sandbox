@@ -10,7 +10,7 @@ import { inspectPackage, packDirectory, readManifest, signDirectory } from "./pa
 import { scaffold } from "./scaffold.js";
 import { permissionSummary, validateManifest } from "./validation.js";
 
-const program = new Command().name("sandbox").description("sndbox developer CLI").version("0.8.0-beta.2");
+const program = new Command().name("sandbox").description("sndbox developer CLI").version("8.0.0-beta.1");
 const plugin = program.command("plugin").description("Build, validate, test, sign, and publish sandboxed plugins");
 
 plugin.command("create <directory>")
