@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, "..");
 const releaseVersion = "0.8.0-beta.1";
 const escapedReleaseVersion = releaseVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-describe("v0.7.10 beta release compatibility", () => {
+describe("v0.8.0 beta release compatibility", () => {
   it("keeps first-party surfaces and runtime components on one beta version", () => {
     const packages = [
       "package.json",

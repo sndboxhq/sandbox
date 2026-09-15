@@ -193,7 +193,7 @@ function platformIcon(platform: PlatformId) {
 
 function verificationLabel(platform: PlatformId, manifest: ReleaseManifest | undefined, unsignedWindowsBeta: boolean) {
   if (platform === "windows") {
-    if (unsignedWindowsBeta) return "SHA-256 checksum · unsigned beta";
+    if (unsignedWindowsBeta) return "Unsigned test build · SHA-256 checksum";
     return manifest ? "Authenticode signature + SHA-256" : "Declared on publication";
   }
   return "Sigstore bundle + SHA-256";
