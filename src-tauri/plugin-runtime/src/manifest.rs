@@ -936,6 +936,12 @@ pub(crate) mod tests {
         );
         assert!(
             manifest
+                .validate(&Version::parse("0.8.0-beta.1").unwrap(), true)
+                .valid
+        );
+
+        assert!(
+            !manifest
                 .validate(&Version::parse("8.0.0-beta.1").unwrap(), true)
                 .valid
         );
@@ -946,7 +952,7 @@ pub(crate) mod tests {
                 .valid
         );
 
-        manifest.minimum_host_version = VersionReq::parse("^0.8.0").unwrap();
+        manifest.minimum_host_version = VersionReq::parse("^8.0.0").unwrap();
         manifest.maximum_host_version = None;
         assert!(
             manifest
