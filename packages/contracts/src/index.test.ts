@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRunnerCompatibility, hasPermission, RUNNER_PROTOCOL_VERSION, runnerCommandSchema, runnerHeartbeatSchema, workspaceActivitySummarySchema, type RunnerIdentity, type RunnerRequirements } from "./index.js";
+import { checkRunnerCompatibility, collaborationOperationInputSchema, hasPermission, RUNNER_PROTOCOL_VERSION, runnerCommandSchema, runnerHeartbeatSchema, workspaceActivitySummarySchema, type RunnerIdentity, type RunnerRequirements } from "./index.js";
 
 describe("contracts", () => {
   it("uses explicit permission bundles", () => {
@@ -13,6 +13,19 @@ describe("contracts", () => {
 
   it("rejects runner protocol messages from another protocol version", () => {
     expect(() => runnerHeartbeatSchema.parse({ protocolVersion: RUNNER_PROTOCOL_VERSION + 1, kind: "heartbeat" })).toThrow();
+  });
+
+  it("accepts only opaque authenticated collaboration operations", () => {
+    const valid = {
+      operationId: "11111111-1111-4111-8111-111111111111",
+      baseSequence: 0,
+      clientSequence: 1,
+      encryptedPayload: Buffer.alloc(32, 7).toString("base64"),
+      payloadHash: `sha256:${"a".repeat(64)}`,
+      createdAt: "2026-09-11T12:00:00.000Z",
+    };
+    expect(collaborationOperationInputSchema.parse(valid)).toMatchObject({ baseSequence: 0 });
+    expect(() => collaborationOperationInputSchema.parse({ ...valid, encryptedPayload: JSON.stringify({ kind: "node_add" }) })).toThrow();
   });
 
   it("requires every capability, plugin, connection and placement constraint", () => {

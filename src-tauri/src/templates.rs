@@ -24,6 +24,8 @@ fn node(
         disabled: false,
         input_bindings: Default::default(),
         plugin: None,
+        customization: None,
+        error_policy: None,
     }
 }
 fn edge(id: &str, source: &str, handle: &str, target: &str) -> WorkflowEdge {

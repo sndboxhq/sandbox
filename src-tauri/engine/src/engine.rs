@@ -1,14 +1,17 @@
 use crate::{
+    contract_for, custom_node_fingerprint,
     expressions::{
         resolve_value as resolve_expression_value, ExpressionContext, EXPRESSION_LANGUAGE_VERSION,
     },
+    gate_node_in_workflow,
     permissions::{require_domain, require_path},
     redaction::{bounded_log, redact_value},
     references::resolve_value,
     validation::{topological_order, validate, ValidationSeverity},
-    CollectionEvidence, DataLineage, Database, EngineError, ExecutionError, ExecutionRecord,
-    ExecutionStatus, InputBinding, NodeExecution, NodeStatus, PendingApproval, RuntimeMetadata,
-    Workflow, WorkflowItem, WorkflowNode,
+    CollectionEvidence, DataLineage, Database, EffectLevel, EngineError, ErrorStrategy,
+    ExecutionError, ExecutionRecord, ExecutionStatus, GateState, InputBinding, NodeExecution,
+    NodeStatus, PendingApproval, RetryBackoff, RetrySafety, RuntimeMetadata, ValueType, Workflow,
+    WorkflowItem, WorkflowNode,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -189,6 +192,53 @@ impl Engine {
                     .join(" "),
             ));
         }
+        for node in workflow
+            .nodes
+            .iter()
+            .filter(|node| !node.disabled && node.node_type != "note")
+        {
+            let gate = gate_node_in_workflow(node, workflow, "local");
+            if gate.state != GateState::Available {
+                return Err(EngineError::Validation(
+                    format!(
+                        "[{}] {} {}",
+                        gate.code,
+                        gate.message,
+                        gate.remediation.unwrap_or_default()
+                    )
+                    .trim()
+                    .to_string(),
+                ));
+            }
+        }
+        for node in workflow
+            .nodes
+            .iter()
+            .filter(|node| node.node_type == "custom_function" && !node.disabled)
+        {
+            let customization = node.customization.as_ref().ok_or_else(|| {
+                EngineError::Validation(format!("{} has no custom contract.", node.name))
+            })?;
+            let fingerprint = custom_node_fingerprint(customization);
+            let verified = self
+                .db
+                .custom_node_verification(&workflow.id, &node.id)?
+                .is_some_and(|receipt| {
+                    receipt.fingerprint == fingerprint
+                        && customization
+                            .outputs
+                            .iter()
+                            .filter(|port| port.required)
+                            .all(|port| receipt.output_coverage.contains(&port.key))
+                        && customization
+                            .branches
+                            .iter()
+                            .all(|port| receipt.branch_coverage.contains(&port.key))
+                });
+            if !verified {
+                return Err(EngineError::Validation(format!("{} is an unverified ƒx node. Run and save all fixtures after the latest code or contract change.", node.name)));
+            }
+        }
         let order = topological_order(workflow)?;
         let started = Utc::now();
         let mut record = ExecutionRecord {
@@ -254,21 +304,23 @@ impl Engine {
             .edges
             .iter()
             .map(|edge| {
-                let routed = workflow
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == edge.source_node_id)
-                    .is_some_and(|n| {
-                        matches!(
-                            n.node_type.as_str(),
-                            "condition"
-                                | "filter"
-                                | "switch"
-                                | "split_out"
-                                | "loop_over_items"
-                                | "remove_duplicates"
-                        )
-                    });
+                let routed = edge.source_handle == "error"
+                    || workflow
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == edge.source_node_id)
+                        .is_some_and(|n| {
+                            matches!(
+                                n.node_type.as_str(),
+                                "condition"
+                                    | "filter"
+                                    | "switch"
+                                    | "validate_schema"
+                                    | "split_out"
+                                    | "loop_over_items"
+                                    | "remove_duplicates"
+                            )
+                        });
                 (edge.id.clone(), !routed)
             })
             .collect();
@@ -336,6 +388,7 @@ impl Engine {
                                     "condition"
                                         | "filter"
                                         | "switch"
+                                        | "validate_schema"
                                         | "split_out"
                                         | "loop_over_items"
                                         | "remove_duplicates"
@@ -364,7 +417,12 @@ impl Engine {
                     .node_executions
                     .iter()
                     .find(|execution| execution.node_id == edge.source_node_id)
-                    .filter(|execution| !matches!(execution.status, NodeStatus::Successful))
+                    .filter(|execution| {
+                        !matches!(
+                            execution.status,
+                            NodeStatus::Successful | NodeStatus::Handled
+                        )
+                    })
                     .map(|execution| (edge.source_node_id.as_str(), execution.status))
             });
             if let Some((dependency, status)) = failed_dependency {
@@ -456,10 +514,52 @@ impl Engine {
                     .unwrap_or(workflow.settings.default_node_timeout_ms)
                     .clamp(100, 600_000)
             };
-            let execution = tokio::select! {
-                _ = cancellation.cancelled() => Err(EngineError::Cancelled),
-                result = tokio::time::timeout(Duration::from_millis(timeout_ms), self.execute_node(node, workflow, &record.id, &trigger, &outputs, &pending_state, cancellation.clone())) => {
-                    match result { Ok(value) => value, Err(_) => Err(EngineError::Node(format!("{} exceeded its {}-second timeout.", node.name, timeout_ms as f64 / 1000.0))) }
+            let policy = node.error_policy.clone().unwrap_or_default();
+            let retry_allowed = contract_for(&node.node_type).is_some_and(|contract| {
+                contract.effect_level != EffectLevel::Destructive
+                    && contract.retry_safety == RetrySafety::Safe
+            });
+            let mut retries_performed = 0u32;
+            let execution = loop {
+                let attempt = tokio::select! {
+                    _ = cancellation.cancelled() => Err(EngineError::Cancelled),
+                    result = tokio::time::timeout(Duration::from_millis(timeout_ms), self.execute_node(node, workflow, &record.id, &trigger, &outputs, &pending_state, cancellation.clone())) => {
+                        match result { Ok(value) => value, Err(_) => Err(EngineError::Node(format!("{} exceeded its {}-second timeout.", node.name, timeout_ms as f64 / 1000.0))) }
+                    }
+                };
+                match attempt {
+                    Ok(mut result) => {
+                        result.retry_count = result.retry_count.saturating_add(retries_performed);
+                        break Ok(result);
+                    }
+                    Err(error)
+                        if !matches!(error, EngineError::Cancelled)
+                            && retry_allowed
+                            && retries_performed < policy.max_retries as u32 =>
+                    {
+                        retries_performed += 1;
+                        record.node_executions[idx].retry_count = retries_performed;
+                        record.node_executions[idx].logs.push(format!(
+                            "Attempt {} failed; retry {} of {} scheduled.",
+                            retries_performed, retries_performed, policy.max_retries
+                        ));
+                        self.publish(&record)?;
+                        let multiplier = if policy.backoff == RetryBackoff::Exponential {
+                            1u64.checked_shl(retries_performed.saturating_sub(1))
+                                .unwrap_or(u64::MAX)
+                        } else {
+                            1
+                        };
+                        let delay_ms = policy
+                            .retry_delay_ms
+                            .saturating_mul(multiplier)
+                            .min(120_000);
+                        tokio::select! {
+                            _ = cancellation.cancelled() => break Err(EngineError::Cancelled),
+                            _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => {}
+                        }
+                    }
+                    Err(error) => break Err(error),
                 }
             };
             let (execution, loop_summaries) = match execution {
@@ -567,16 +667,51 @@ impl Engine {
                     outputs.insert(node.id.clone(), result.output);
                 }
                 Err(error) => {
-                    node_record.status = if matches!(error, EngineError::Cancelled) {
-                        NodeStatus::Cancelled
-                    } else {
-                        NodeStatus::Failed
-                    };
-                    node_record.error = Some(error.execution_error());
+                    let execution_error = error.execution_error();
+                    node_record.error = Some(execution_error.clone());
+                    node_record.retry_count = retries_performed;
                     if let EngineError::Browser { diagnostics, .. } = &error {
                         node_record.browser_diagnostics = diagnostics.clone();
                     }
                     node_record.logs.push(bounded_log(error.to_string()));
+                    if matches!(error, EngineError::Cancelled) {
+                        node_record.status = NodeStatus::Cancelled;
+                    } else {
+                        match policy.strategy {
+                            ErrorStrategy::Fail => node_record.status = NodeStatus::Failed,
+                            ErrorStrategy::Route => {
+                                node_record.status = NodeStatus::Handled;
+                                let envelope = json!({"error":{"code":execution_error.code,"message":execution_error.message,"detail":execution_error.detail,"suggestion":execution_error.suggestion,"nodeId":node.id,"nodeType":node.node_type,"attempts":retries_performed + 1}});
+                                node_record.output = redact_value(&envelope);
+                                node_record.output_items =
+                                    vec![WorkflowItem::json(envelope.clone())];
+                                node_record.branch_followed = Some("error".into());
+                                for edge in workflow
+                                    .edges
+                                    .iter()
+                                    .filter(|edge| edge.source_node_id == node.id)
+                                {
+                                    active_edges
+                                        .insert(edge.id.clone(), edge.source_handle == "error");
+                                }
+                                outputs.insert(node.id.clone(), envelope);
+                                node_record.logs.push(
+                                    "Failure routed through the reserved error branch.".into(),
+                                );
+                            }
+                            ErrorStrategy::Fallback => {
+                                node_record.status = NodeStatus::Handled;
+                                let fallback = policy.fallback_outputs.clone();
+                                node_record.output = redact_value(&fallback);
+                                node_record.output_items =
+                                    vec![WorkflowItem::json(fallback.clone())];
+                                outputs.insert(node.id.clone(), fallback);
+                                node_record.logs.push(
+                                    "Failure recovered with validated fallback outputs.".into(),
+                                );
+                            }
+                        }
+                    }
                 }
             }
             if let Some(diagnostics) = node_record.browser_diagnostics.clone() {
@@ -631,6 +766,12 @@ impl Engine {
             .any(|n| n.status == NodeStatus::Failed)
         {
             ExecutionStatus::Failed
+        } else if record
+            .node_executions
+            .iter()
+            .any(|n| n.status == NodeStatus::Handled)
+        {
+            ExecutionStatus::SuccessfulWithWarnings
         } else {
             ExecutionStatus::Successful
         };
@@ -638,7 +779,11 @@ impl Engine {
             .node_executions
             .iter()
             .find_map(|node| node.error.clone());
-        if record.status == ExecutionStatus::Successful && !pending_state.is_empty() {
+        if matches!(
+            record.status,
+            ExecutionStatus::Successful | ExecutionStatus::SuccessfulWithWarnings
+        ) && !pending_state.is_empty()
+        {
             self.db.set_workflow_states(&workflow.id, &pending_state)?;
         }
         self.publish(&record)?;
@@ -1164,6 +1309,23 @@ impl Engine {
         };
         resolved_node.configuration =
             resolve_configuration_expressions(&resolved_node.configuration, &context)?;
+        if resolved_node.node_type == "custom_function" {
+            let customization = resolved_node.customization.as_ref().ok_or_else(|| {
+                EngineError::Validation("Custom function contract is missing.".into())
+            })?;
+            let custom_configuration = resolved_node.configuration.clone();
+            resolved_node.configuration = json!({
+                "language": customization.language,
+                "sourceCode": customization.source_code,
+                "executionMode": "run",
+                "itemMode": "all_items",
+                "runtimeVersion": customization.runtime_requirement,
+                "helperLanguageVersion": EXPRESSION_LANGUAGE_VERSION,
+                "dependencies": [],
+                "timeoutMs": 30_000,
+                "customConfiguration": custom_configuration
+            });
+        }
         if resolved_node.node_type == "merge" {
             let mut successful = workflow
                 .edges
@@ -1209,6 +1371,10 @@ impl Engine {
                 json!({"executionTime":Utc::now(),"workflowId":workflow.id,"triggerType":node.node_type,"event":trigger}),
             )),
             "condition" => execute_condition(node, trigger, outputs),
+            "map_fields" => execute_map_fields(node, &input),
+            "validate_schema" => execute_validate_schema(node, &input),
+            "text_template" => execute_text_template(node),
+            "hash_data" => execute_hash_data(&input),
             "filter" | "switch" | "split_out" | "loop_over_items" | "aggregate"
             | "remove_duplicates" | "merge" => {
                 let named_inputs = canonical_named_inputs(workflow, node, outputs);
@@ -1292,8 +1458,8 @@ impl Engine {
             }
             "run_command" => execute_command(node, workflow, trigger, outputs, cancellation).await,
             "ai_prompt" => self.execute_ai_prompt(node, cancellation).await,
-            "code" | "javascript_code" | "python_code" => {
-                execute_code(
+            "code" | "javascript_code" | "python_code" | "custom_function" => {
+                let result = execute_code(
                     node,
                     workflow,
                     execution_id,
@@ -1303,7 +1469,12 @@ impl Engine {
                     outputs,
                     cancellation,
                 )
-                .await
+                .await?;
+                if node.node_type == "custom_function" {
+                    normalize_custom_function_result(node, result)
+                } else {
+                    Ok(result)
+                }
             }
             "web_builder" => {
                 self.execute_web_builder(node, workflow, trigger, outputs)
@@ -2931,8 +3102,9 @@ async fn execute_code(
         }))
         .log(format!("Provided {} source to downstream nodes.", language)));
     }
-    if !workflow.settings.permissions.command_execution_permitted
-        || workflow.settings.permissions.approval_revision.is_none()
+    if node.node_type != "custom_function"
+        && (!workflow.settings.permissions.command_execution_permitted
+            || workflow.settings.permissions.approval_revision.is_none())
     {
         return Err(EngineError::Permission(
             "Executing a Code node requires command execution approval.".into(),
@@ -3001,6 +3173,7 @@ async fn execute_code(
         "trigger": trigger,
         "workflow": {"id":workflow.id,"name":workflow.name,"schemaVersion":workflow.schema_version},
         "execution": {"id":execution_id,"attempt":1},
+        "configuration": node.configuration.get("customConfiguration").cloned().unwrap_or_else(|| json!({})),
         "mode": execution_mode,
     });
     let mut command = Command::new(executable);
@@ -3033,17 +3206,23 @@ async fn execute_code(
             "Code could not start {executable}. Install it or switch this node to source mode: {error}"
         ))
     })?;
-    let mut stdin = child.stdin.take().expect("piped stdin");
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        EngineError::Node("Code runtime did not provide its configured input pipe.".into())
+    })?;
     let encoded_payload = serde_json::to_vec(&payload)
         .map_err(|error| EngineError::Node(format!("Code input could not be encoded: {error}")))?;
     tokio::spawn(async move {
         let _ = stdin.write_all(&encoded_payload).await;
     });
     let stdout_task = tokio::spawn(read_bounded_to(
-        child.stdout.take().expect("piped stdout"),
+        child.stdout.take().ok_or_else(|| {
+            EngineError::Node("Code runtime did not provide its configured output pipe.".into())
+        })?,
         1_048_576,
     ));
-    let stderr_task = tokio::spawn(read_bounded(child.stderr.take().expect("piped stderr")));
+    let stderr_task = tokio::spawn(read_bounded(child.stderr.take().ok_or_else(|| {
+        EngineError::Node("Code runtime did not provide its configured error pipe.".into())
+    })?));
     let timeout_ms = node
         .configuration
         .get("timeoutMs")
@@ -3067,9 +3246,14 @@ async fn execute_code(
             }
         }
     };
-    let stdout_bytes = stdout_task.await.unwrap_or_default();
+    let stdout_bytes = stdout_task.await.map_err(|error| {
+        EngineError::Node(format!("Code output reader stopped unexpectedly: {error}"))
+    })?;
     let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
-    let stderr = String::from_utf8_lossy(&stderr_task.await.unwrap_or_default()).to_string();
+    let stderr_bytes = stderr_task.await.map_err(|error| {
+        EngineError::Node(format!("Code error reader stopped unexpectedly: {error}"))
+    })?;
+    let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
     let _ = tokio::fs::remove_file(&script_path).await;
     if !status.success() {
         return Err(EngineError::Node(format!(
@@ -3123,6 +3307,118 @@ async fn execute_code(
         .with_capability("code.execute"))
 }
 
+fn normalize_custom_function_result(
+    node: &WorkflowNode,
+    mut result: NodeResult,
+) -> Result<NodeResult, EngineError> {
+    let customization = node
+        .customization
+        .as_ref()
+        .ok_or_else(|| EngineError::Validation("Custom function contract is missing.".into()))?;
+    let returned = result
+        .output
+        .pointer("/result/0/data")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let object = returned.as_object().ok_or_else(|| {
+        EngineError::Node("Custom functions must return { outputs, branches? }.".into())
+    })?;
+    let outputs = object
+        .get("outputs")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            EngineError::Node("Custom functions must return an outputs object.".into())
+        })?;
+    for port in &customization.outputs {
+        let value = outputs.get(&port.key);
+        if port.required && value.is_none() {
+            return Err(EngineError::Node(format!(
+                "Custom function did not return required output '{}'.",
+                port.key
+            )));
+        }
+        if let Some(value) = value {
+            let valid = match port.value_type {
+                ValueType::Any => true,
+                ValueType::String | ValueType::Path | ValueType::Connection => value.is_string(),
+                ValueType::Number => value.is_number(),
+                ValueType::Boolean => value.is_boolean(),
+                ValueType::Object => value.is_object(),
+                ValueType::Array => value.is_array(),
+            };
+            if !valid {
+                return Err(EngineError::Node(format!(
+                    "Custom output '{}' does not match its declared {:?} type.",
+                    port.key, port.value_type
+                )));
+            }
+        }
+    }
+    if outputs
+        .keys()
+        .any(|key| !customization.outputs.iter().any(|port| &port.key == key))
+    {
+        return Err(EngineError::Node(
+            "Custom function returned an undeclared output.".into(),
+        ));
+    }
+    let declared_branches = customization
+        .branches
+        .iter()
+        .map(|port| port.key.as_str())
+        .collect::<HashSet<_>>();
+    let branches = object
+        .get("branches")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if branches
+        .keys()
+        .any(|key| !declared_branches.contains(key.as_str()))
+    {
+        return Err(EngineError::Node(
+            "Custom function returned an undeclared branch.".into(),
+        ));
+    }
+    result.branch_outputs = branches
+        .into_iter()
+        .map(|(key, value)| {
+            let values = value.as_array().cloned().unwrap_or_else(|| vec![value]);
+            (
+                key.clone(),
+                values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, value)| {
+                        let mut item = WorkflowItem::json(value);
+                        item.source_node_id = Some(node.id.clone());
+                        item.source_item_index = Some(index);
+                        item.branch = Some(key.clone());
+                        item
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    result.collection = Some(CollectionEvidence {
+        input_item_count: 0,
+        output_item_count: 1,
+        branch_counts: result
+            .branch_outputs
+            .iter()
+            .map(|(key, items)| (key.clone(), items.len()))
+            .collect(),
+        ordering_policy: "declared_custom_branch_order".into(),
+        ..Default::default()
+    });
+    result.output = Value::Object(outputs.clone());
+    result.output_items = vec![WorkflowItem::json(result.output.clone())];
+    result
+        .logs
+        .push("Validated custom ƒx outputs and branch correspondence.".into());
+    Ok(result)
+}
+
 const JAVASCRIPT_CODE_WRAPPER: &str = r#"'use strict';
 const nativeProcess = process;
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
@@ -3135,7 +3431,7 @@ nativeProcess.stdin.on('end', async () => {
   const helpers=Object.freeze({json:Object.freeze({parse:JSON.parse,stringify:JSON.stringify}),string:Object.freeze({trim:v=>String(v).trim(),lower:v=>String(v).toLowerCase(),upper:v=>String(v).toUpperCase()}),number:v=>{const n=Number(v);if(!Number.isFinite(n))throw new TypeError('number() conversion failed');return n;},boolean:v=>v===true||v==='true'||(typeof v==='number'&&v!==0),array:Object.freeze({first:v=>v?.[0]??null,last:v=>v?.[v.length-1]??null,length:v=>Array.isArray(v)?v.length:0}),object:Object.freeze({keys:Object.keys,values:Object.values}),date:Object.freeze({iso:v=>new Date(v).toISOString()})});
   let seed=2166136261; Math.random=()=>((seed=Math.imul(seed^seed>>>15,1|seed))>>>0)/4294967296; const NativeDate=Date,fixed=NativeDate.now(); globalThis.Date=class extends NativeDate{constructor(...args){super(...(args.length?args:[fixed]));}static now(){return fixed;}};
   try { delete globalThis.process; delete globalThis.fetch; } catch {}
-  const run=async (input,items)=>{ const fn=new AsyncFunction('ctx','input','items','nodes','trigger','workflow','execution','helpers','console','require','process','fetch','"use strict";\n'+payload.source); return await fn(Object.freeze({input,items,nodes:payload.nodes,trigger:payload.trigger,workflow:payload.workflow,execution:payload.execution,helpers,log:safeConsole.log}),input,items,payload.nodes,payload.trigger,payload.workflow,payload.execution,helpers,safeConsole,undefined,undefined,undefined); };
+  const run=async (input,items)=>{ const fn=new AsyncFunction('ctx','input','items','nodes','trigger','workflow','execution','helpers','console','require','process','fetch','"use strict";\n'+payload.source); return await fn(Object.freeze({input,inputs:payload.configuration.fixtureInputs??input,items,configuration:payload.configuration,upstream:payload.nodes,nodes:payload.nodes,trigger:payload.trigger,workflow:payload.workflow,execution:payload.execution,helpers,log:safeConsole.log}),input,items,payload.nodes,payload.trigger,payload.workflow,payload.execution,helpers,safeConsole,undefined,undefined,undefined); };
   try { let value;if(payload.mode==='each_item'){value=[];for(const item of payload.items)value.push(await run(item.data,[item]));}else value=await run(payload.input,payload.items); if(value===undefined)value=null; const items=Array.isArray(value)?value:(value&&Array.isArray(value.items)?value.items:[value]); nativeProcess.stdout.write(JSON.stringify({result:items.map((v,i)=>v&&Object.prototype.hasOwnProperty.call(v,'data')?v:{data:v,sourceItemIndex:i}),logs})); } catch(error){ nativeProcess.stderr.write(String(error?.stack||error)); nativeProcess.exitCode=1; }
 });"#;
 
@@ -3163,7 +3459,7 @@ def audit(event,args):
 sys.addaudithook(audit)
 helpers={'string':{'trim':lambda v:str(v).strip(),'lower':lambda v:str(v).lower(),'upper':lambda v:str(v).upper()},'array':{'first':lambda v:v[0] if v else None,'last':lambda v:v[-1] if v else None}}
 def run(inp,items):
- scope={'ctx':{'input':inp,'items':items,'nodes':payload['nodes'],'trigger':payload['trigger'],'workflow':payload['workflow'],'execution':payload['execution'],'helpers':helpers},'input':inp,'items':items,'nodes':payload['nodes'],'trigger':payload['trigger'],'workflow':payload['workflow'],'execution':payload['execution'],'helpers':helpers,'result':None,'print':lambda *v,**k:record_log(' '.join(map(str,v)))}
+ scope={'ctx':{'input':inp,'inputs':payload['configuration'].get('fixtureInputs',inp),'items':items,'configuration':payload['configuration'],'upstream':payload['nodes'],'nodes':payload['nodes'],'trigger':payload['trigger'],'workflow':payload['workflow'],'execution':payload['execution'],'helpers':helpers,'log':record_log},'input':inp,'items':items,'nodes':payload['nodes'],'trigger':payload['trigger'],'workflow':payload['workflow'],'execution':payload['execution'],'helpers':helpers,'result':None,'print':lambda *v,**k:record_log(' '.join(map(str,v)))}
  exec(compile(payload['source'],'user_code.py','exec'),{'__builtins__':dict(vars(builtins),open=None,exec=None,eval=None,compile=None,input=None)},scope)
  if callable(scope.get('main')): return scope['main'](scope['ctx'])
  return scope.get('result')
@@ -3231,6 +3527,211 @@ fn runtime_requirement_met(requirement: &str, actual: &str) -> bool {
     } else {
         actual_parts.starts_with(&expected)
     }
+}
+
+fn data_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    if path.trim().is_empty() || path == "$" {
+        return Some(value);
+    }
+    let mut current = value;
+    for segment in path
+        .trim_start_matches("$.")
+        .trim_start_matches('/')
+        .split(['.', '/'])
+        .filter(|segment| !segment.is_empty())
+    {
+        current = match current {
+            Value::Object(object) => object.get(segment)?,
+            Value::Array(array) => array.get(segment.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+    }
+    Some(current)
+}
+
+fn insert_data_path(target: &mut Value, path: &str, value: Value) -> Result<(), EngineError> {
+    let parts = path
+        .trim_start_matches("$.")
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return Err(EngineError::Validation(
+            "Map Fields target paths cannot be empty.".into(),
+        ));
+    }
+    if !target.is_object() {
+        *target = json!({});
+    }
+    let mut object = target.as_object_mut().expect("object initialized above");
+    for part in &parts[..parts.len() - 1] {
+        let entry = object
+            .entry((*part).to_string())
+            .or_insert_with(|| json!({}));
+        object = entry.as_object_mut().ok_or_else(|| {
+            EngineError::Node(format!(
+                "Map Fields cannot create a nested value beneath non-object field '{part}'."
+            ))
+        })?;
+    }
+    object.insert(parts[parts.len() - 1].to_string(), value);
+    Ok(())
+}
+
+fn execute_map_fields(node: &WorkflowNode, input: &Value) -> Result<NodeResult, EngineError> {
+    let mappings = node
+        .configuration
+        .get("mappings")
+        .and_then(Value::as_array)
+        .ok_or_else(|| EngineError::Validation("Map Fields requires a mappings array.".into()))?;
+    if mappings.is_empty() {
+        return Err(EngineError::Validation(
+            "Map Fields requires at least one mapping.".into(),
+        ));
+    }
+    let preserve = node
+        .configuration
+        .get("preserveUnmapped")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut mapped = if preserve { input.clone() } else { json!({}) };
+    let mut mapped_count = 0usize;
+    for (index, mapping) in mappings.iter().enumerate() {
+        let source = mapping.get("source").and_then(Value::as_str).unwrap_or("");
+        let target = mapping
+            .get("target")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                EngineError::Validation(format!(
+                    "Map Fields mapping {} requires a target path.",
+                    index + 1
+                ))
+            })?;
+        let value = data_path(input, source)
+            .cloned()
+            .or_else(|| mapping.get("default").cloned());
+        let required = mapping
+            .get("required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let Some(value) = value else {
+            if required {
+                return Err(EngineError::Node(format!(
+                    "Map Fields could not find required source path '{source}'."
+                )));
+            }
+            continue;
+        };
+        insert_data_path(&mut mapped, target, value)?;
+        mapped_count += 1;
+    }
+    Ok(
+        NodeResult::new(json!({"value":mapped,"mappedCount":mapped_count}))
+            .log(format!("Mapped {mapped_count} field(s).")),
+    )
+}
+
+fn schema_value_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn execute_validate_schema(node: &WorkflowNode, input: &Value) -> Result<NodeResult, EngineError> {
+    let rules = node
+        .configuration
+        .get("rules")
+        .and_then(Value::as_array)
+        .ok_or_else(|| EngineError::Validation("Validate Schema requires a rules array.".into()))?;
+    if rules.is_empty() {
+        return Err(EngineError::Validation(
+            "Validate Schema requires at least one rule.".into(),
+        ));
+    }
+    let mut errors = Vec::new();
+    for (index, rule) in rules.iter().enumerate() {
+        let path = rule.get("path").and_then(Value::as_str).unwrap_or("");
+        let expected = rule.get("type").and_then(Value::as_str).unwrap_or("any");
+        let required = rule
+            .get("required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        match data_path(input, path) {
+            None if required => errors.push(json!({"index":index,"path":path,"code":"required","message":format!("Required field '{path}' is missing.")})),
+            None => {}
+            Some(actual) if expected != "any" && schema_value_type(actual) != expected => errors.push(json!({"index":index,"path":path,"code":"type","expected":expected,"actual":schema_value_type(actual),"message":format!("Field '{path}' must be {expected}, not {}.",schema_value_type(actual))})),
+            Some(_) => {}
+        }
+    }
+    let is_valid = errors.is_empty();
+    let branch = if is_valid { "valid" } else { "invalid" };
+    let payload = json!({"isValid":is_valid,"value":input,"errors":errors});
+    let mut branches = Map::new();
+    branches.insert(branch.into(), payload);
+    let output = json!({
+        "isValid": is_valid,
+        "value": input,
+        "errors": errors,
+        "branches": branches
+    });
+    Ok(NodeResult::new(output)
+        .with_branch(branch)
+        .log(format!("Schema validation followed the {branch} branch.")))
+}
+
+fn execute_text_template(node: &WorkflowNode) -> Result<NodeResult, EngineError> {
+    let text = node
+        .configuration
+        .get("template")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::Validation("Text Template must resolve to text.".into()))?;
+    if text.len() > 1_048_576 {
+        return Err(EngineError::Node(
+            "Text Template output exceeded the 1 MB limit.".into(),
+        ));
+    }
+    Ok(NodeResult::new(json!({"text":text})).log(format!(
+        "Rendered {} characters of text.",
+        text.chars().count()
+    )))
+}
+
+fn canonical_json_value(value: &Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(values.iter().map(canonical_json_value).collect()),
+        Value::Object(object) => {
+            let mut keys = object.keys().collect::<Vec<_>>();
+            keys.sort();
+            let mut result = Map::new();
+            for key in keys {
+                result.insert(key.clone(), canonical_json_value(&object[key]));
+            }
+            Value::Object(result)
+        }
+        scalar => scalar.clone(),
+    }
+}
+
+fn execute_hash_data(input: &Value) -> Result<NodeResult, EngineError> {
+    let canonical = serde_json::to_vec(&canonical_json_value(input)).map_err(|error| {
+        EngineError::Node(format!("Hash Data could not serialize its input: {error}"))
+    })?;
+    let hash = format!("{:x}", Sha256::digest(&canonical));
+    Ok(
+        NodeResult::new(json!({"hash":hash,"algorithm":"sha256","bytes":canonical.len()})).log(
+            format!(
+                "Hashed {} canonical JSON bytes with SHA-256.",
+                canonical.len()
+            ),
+        ),
+    )
 }
 
 fn execute_condition(
@@ -4003,13 +4504,25 @@ async fn execute_command(
     let mut child = command.spawn().map_err(|e| {
         EngineError::Node(format!("Run Command could not start '{executable}': {e}"))
     })?;
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child.stdout.take().ok_or_else(|| {
+        EngineError::Node("Run Command did not provide its configured output pipe.".into())
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        EngineError::Node("Run Command did not provide its configured error pipe.".into())
+    })?;
     let stdout_task = tokio::spawn(read_bounded(stdout));
     let stderr_task = tokio::spawn(read_bounded(stderr));
     let output = tokio::select! { _=cancellation.cancelled()=>{ let _=child.kill().await; return Err(EngineError::Cancelled); }, status=child.wait()=>status.map_err(|e|EngineError::Node(format!("Run Command could not wait for '{executable}': {e}")))? };
-    let out = stdout_task.await.unwrap_or_default();
-    let err = stderr_task.await.unwrap_or_default();
+    let out = stdout_task.await.map_err(|error| {
+        EngineError::Node(format!(
+            "Run Command output reader stopped unexpectedly: {error}"
+        ))
+    })?;
+    let err = stderr_task.await.map_err(|error| {
+        EngineError::Node(format!(
+            "Run Command error reader stopped unexpectedly: {error}"
+        ))
+    })?;
     let stdout = String::from_utf8_lossy(&out).to_string();
     let stderr = String::from_utf8_lossy(&err).to_string();
     if !output.success() {
@@ -4160,6 +4673,8 @@ mod tests {
             disabled: false,
             input_bindings: Default::default(),
             plugin: None,
+            customization: None,
+            error_policy: None,
         }
     }
     fn edge(id: &str, s: &str, handle: &str, t: &str) -> WorkflowEdge {
@@ -4663,6 +5178,8 @@ mod tests {
                 edge("c", "dedupe", "output", "fail"),
             ],
         );
+        wf.settings.permissions.command_execution_permitted = true;
+        wf.settings.permissions.approval_revision = Some("reviewed-test-revision".into());
         engine.database().save_workflow(wf.clone()).unwrap();
         let failed = engine
             .run(wf.clone(), json!({}), CancellationToken::new())
@@ -5162,7 +5679,7 @@ mod tests {
                 node(
                     "http",
                     "http_request",
-                    json!({"method":"GET","url":"https://not-approved.example","timeoutMs":1000}),
+                    json!({"method":"GET","url":"http://127.0.0.1:9","timeoutMs":1000}),
                 ),
                 node("after", "set_data", json!({"values":{"ok":true}})),
             ],
@@ -5171,7 +5688,7 @@ mod tests {
                 edge("b", "http", "output", "after"),
             ],
         );
-        wf.settings.permissions.approved_network_domains.clear();
+        wf.settings.permissions.approved_network_domains = vec!["127.0.0.1".into()];
         engine.database().save_workflow(wf.clone()).unwrap();
         let run = engine
             .run(wf, json!({}), CancellationToken::new())
@@ -5296,6 +5813,7 @@ mod tests {
         let destination = directory.path().join("moved");
         std::fs::write(&source, "retry me").unwrap();
         std::fs::create_dir(&destination).unwrap();
+        std::fs::write(destination.join("source.txt"), "existing").unwrap();
         let engine = Engine::new(Database::in_memory().unwrap(), Arc::new(LocalHost));
         let mut wf = base(
             vec![
@@ -5312,7 +5830,8 @@ mod tests {
             ],
             vec![edge("a", "trigger", "output", "move")],
         );
-        wf.settings.permissions.approved_folders.clear();
+        wf.settings.permissions.approved_folders =
+            vec![directory.path().to_string_lossy().to_string()];
         engine.database().save_workflow(wf.clone()).unwrap();
         let first = engine
             .run(
@@ -5324,8 +5843,7 @@ mod tests {
             .unwrap();
         assert_eq!(first.status, ExecutionStatus::Failed);
 
-        wf.settings.permissions.approved_folders =
-            vec![directory.path().to_string_lossy().to_string()];
+        std::fs::remove_file(destination.join("source.txt")).unwrap();
         engine.database().save_workflow(wf).unwrap();
         let retried = engine
             .retry_failed_node(&first.id, "move", CancellationToken::new())
@@ -5335,5 +5853,154 @@ mod tests {
         assert_eq!(retried.node_executions.len(), 1);
         assert_eq!(retried.node_executions[0].retry_count, 1);
         assert!(destination.join("source.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn power_data_nodes_execute_through_test_node() {
+        let engine = Engine::new(Database::in_memory().unwrap(), Arc::new(LocalHost));
+        let map = node(
+            "map",
+            "map_fields",
+            json!({
+                "mappings":[
+                    {"source":"profile.first","target":"name.first","required":true},
+                    {"source":"missing","target":"role","default":"developer"}
+                ],
+                "preserveUnmapped":false
+            }),
+        );
+        let map_workflow = base(
+            vec![node("trigger", "manual_trigger", json!({})), map],
+            vec![],
+        );
+        engine
+            .database()
+            .save_workflow(map_workflow.clone())
+            .unwrap();
+        let mapped = engine
+            .test_node(
+                map_workflow,
+                "map",
+                json!({"input":{"profile":{"first":"Ada"}}}),
+                None,
+                false,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            mapped.node_executions[0].output["value"]["name"]["first"],
+            json!("Ada")
+        );
+        assert_eq!(
+            mapped.node_executions[0].output["value"]["role"],
+            json!("developer")
+        );
+
+        let validate = node(
+            "validate",
+            "validate_schema",
+            json!({"rules":[{"path":"id","type":"number","required":true}]}),
+        );
+        let validate_workflow = base(
+            vec![node("trigger", "manual_trigger", json!({})), validate],
+            vec![],
+        );
+        engine
+            .database()
+            .save_workflow(validate_workflow.clone())
+            .unwrap();
+        let invalid = engine
+            .test_node(
+                validate_workflow,
+                "validate",
+                json!({"input":{"id":"not-a-number"}}),
+                None,
+                false,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            invalid.node_executions[0].branch_followed.as_deref(),
+            Some("invalid")
+        );
+        assert_eq!(
+            invalid.node_executions[0].output["errors"][0]["code"],
+            json!("type")
+        );
+
+        let template = node(
+            "template",
+            "text_template",
+            json!({"template":"Hello {{input.name}}"}),
+        );
+        let template_workflow = base(
+            vec![node("trigger", "manual_trigger", json!({})), template],
+            vec![],
+        );
+        engine
+            .database()
+            .save_workflow(template_workflow.clone())
+            .unwrap();
+        let rendered = engine
+            .test_node(
+                template_workflow,
+                "template",
+                json!({"input":{"name":"Ada"}}),
+                None,
+                false,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            rendered.node_executions[0].output["text"],
+            json!("Hello Ada")
+        );
+
+        let hash = node("hash", "hash_data", json!({"encoding":"hex"}));
+        let first_workflow = base(
+            vec![node("trigger", "manual_trigger", json!({})), hash.clone()],
+            vec![],
+        );
+        let second_workflow = base(
+            vec![node("trigger", "manual_trigger", json!({})), hash],
+            vec![],
+        );
+        engine
+            .database()
+            .save_workflow(first_workflow.clone())
+            .unwrap();
+        let first = engine
+            .test_node(
+                first_workflow,
+                "hash",
+                json!({"input":{"a":1,"b":2}}),
+                None,
+                false,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        engine
+            .database()
+            .save_workflow(second_workflow.clone())
+            .unwrap();
+        let second = engine
+            .test_node(
+                second_workflow,
+                "hash",
+                json!({"input":{"b":2,"a":1}}),
+                None,
+                false,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            first.node_executions[0].output["hash"],
+            second.node_executions[0].output["hash"]
+        );
     }
 }

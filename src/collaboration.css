@@ -1,0 +1,123 @@
+.collaboration-setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.collaboration-option {
+  position: relative;
+  display: flex;
+  min-height: 310px;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-raised) 30%, var(--surface));
+}
+
+.collaboration-option-primary {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent) 9%, transparent), transparent 48%),
+    color-mix(in srgb, var(--surface-raised) 24%, var(--surface));
+}
+
+.collaboration-option-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-strong));
+  border-radius: 11px;
+  background: var(--surface-raised);
+  color: var(--accent);
+}
+
+.collaboration-option h3,
+.collaboration-section h3 { margin: 0; font-size: 13px; }
+.collaboration-option p,
+.collaboration-section p { margin: 6px 0 0; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+.collaboration-option .field { margin: auto 0 0; }
+.collaboration-option textarea,
+.collaboration-invite-row textarea { resize: none; font: 9px/1.5 "SFMono-Regular", Consolas, monospace; }
+.collaboration-option > .button { align-self: flex-start; }
+
+.collaboration-divider {
+  position: relative;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.collaboration-divider::before {
+  position: absolute;
+  width: 1px;
+  height: 72%;
+  background: var(--border);
+  content: "";
+}
+
+.collaboration-divider span {
+  position: relative;
+  z-index: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.collaboration-session { display: flex; flex-direction: column; gap: 12px; }
+.collaboration-live-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--success) 28%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--success) 7%, var(--surface));
+}
+.collaboration-live-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+.collaboration-live-card > div { flex: 1; }
+.collaboration-live-card b,
+.collaboration-live-card small,
+.collaboration-person b,
+.collaboration-person small { display: block; }
+.collaboration-live-card b { font-size: 12px; }
+.collaboration-live-card small,
+.collaboration-person small { margin-top: 4px; color: var(--text-muted); font-size: 9px; }
+.collaboration-live-pill { padding: 4px 8px; border-radius: 99px; background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+
+.collaboration-section { padding: 15px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface-raised) 24%, var(--surface)); }
+.collaboration-section > header { display: flex; align-items: flex-start; gap: 12px; }
+.collaboration-section > header > div { flex: 1; }
+.collaboration-section > header > svg { color: var(--text-muted); }
+.collaboration-invite-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; margin-top: 12px; }
+.collaboration-invite-row textarea { width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-input); color: var(--text-secondary); }
+.collaboration-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }
+.collaboration-person { display: flex; align-items: center; gap: 9px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); }
+.collaboration-avatar { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); color: #fff; font-size: 9px; font-weight: 700; }
+.collaboration-person b { font-size: 10px; }
+.collaboration-waiting { grid-column: 1/-1; display: flex; align-items: center; gap: 8px; padding: 10px; color: var(--text-muted); font-size: 10px; }
+.collaboration-error { margin: 0; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--error) 28%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--error) 6%, var(--surface)); color: var(--error); font-size: 10px; }
+.collaboration-footer { display: flex; align-items: center; justify-content: space-between; color: var(--text-muted); font-size: 9px; }
+.collaboration-footer code { color: var(--text-secondary); }
+
+.collaboration-toolbar { display: flex; height: 30px; align-items: center; gap: 7px; padding: 0 9px !important; border-color: var(--border-strong) !important; }
+.collaboration-toolbar.live { border-color: color-mix(in srgb, var(--success) 34%, var(--border)) !important; background: color-mix(in srgb, var(--success) 7%, var(--surface)) !important; }
+.collaboration-toolbar .collaboration-toolbar-avatars { display: flex; margin-left: 1px; }
+.collaboration-toolbar .collaboration-avatar { width: 20px; height: 20px; margin-left: -5px; border: 2px solid var(--surface); font-size: 7px; }
+.collaboration-toolbar .collaboration-avatar:first-child { margin-left: 0; }
+.react-flow__node.remote-selected .node-card { border-color: var(--collaborator-color, var(--accent)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--collaborator-color, var(--accent)) 22%, transparent), 0 7px 24px rgba(0,0,0,.3); }
+
+@media (max-width: 760px) {
+  .collaboration-setup { grid-template-columns: 1fr; gap: 12px; }
+  .collaboration-divider { height: 24px; }
+  .collaboration-divider::before { width: 65%; height: 1px; }
+  .collaboration-people,
+  .collaboration-invite-row { grid-template-columns: 1fr; }
+  .collaboration-invite-row .button { justify-self: start; }
+}

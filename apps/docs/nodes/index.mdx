@@ -4,7 +4,7 @@ description: "Every node currently implemented in sndbox, generated from the pro
 icon: "blocks"
 ---
 
-sndbox currently implements **55 built-in nodes** across triggers, logic, data, network, browser, communication, and system automation. These pages are generated from `src/catalogue.ts`; names, type IDs, defaults, typed ports, side-effect flags, and supported placements are not hand-copied.
+sndbox currently implements **60 built-in nodes** across triggers, logic, data, network, browser, communication, and system automation. These pages are generated from `src/catalogue.ts`; names, type IDs, defaults, typed ports, side-effect flags, and supported placements are not hand-copied.
 
 <Tip>
   Start with a trigger, connect compatible ports, and map outputs into later node fields. The node inspector only shows settings implemented by that node.
@@ -91,6 +91,9 @@ The **Default node configuration** block is the exact generated storage shape. *
 <Card title="Merge" icon="git-branch" href="/nodes/merge">
   Join named branches without arrival-time races.
 </Card>
+<Card title="Validate Schema" icon="git-branch" href="/nodes/validate-schema">
+  Route data by required fields and sndbox value types.
+</Card>
 <Card title="Delay" icon="git-branch" href="/nodes/delay">
   Wait without blocking the runner.
 </Card>
@@ -114,6 +117,15 @@ The **Default node configuration** block is the exact generated storage shape. *
 </Card>
 <Card title="Set Data" icon="braces" href="/nodes/set-data">
   Construct a structured object.
+</Card>
+<Card title="Map Fields" icon="braces" href="/nodes/map-fields">
+  Project, rename, and default object fields without code.
+</Card>
+<Card title="Text Template" icon="braces" href="/nodes/text-template">
+  Render text with safe workflow expressions.
+</Card>
+<Card title="Hash Data" icon="braces" href="/nodes/hash-data">
+  Create a deterministic SHA-256 digest of JSON data.
 </Card>
 <Card title="Read File" icon="braces" href="/nodes/read-file">
   Read text from an approved file.
@@ -144,6 +156,9 @@ The **Default node configuration** block is the exact generated storage shape. *
 </Card>
 <Card title="Python Code" icon="braces" href="/nodes/python-code">
   Transform workflow items in a restricted Python runtime.
+</Card>
+<Card title="Custom Function" icon="braces" href="/nodes/custom-function">
+  A verified local ƒx node with an editable contract.
 </Card>
 <Card title="Code / Source (legacy)" icon="braces" href="/nodes/code">
   Author a source block or migrate it to a dedicated Code node.

@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createNode, createPluginNode, definitionFor, enabledPluginNodes, NODE_DEFINITIONS } from "./catalogue";
 import type { InstalledPlugin } from "./types";
+import nodeContractSnapshot from "./generated/node-contracts.json";
 
 describe("stage two node catalogue", () => {
+  it("corresponds one-to-one with the generated engine contract snapshot", () => {
+    expect(NODE_DEFINITIONS.map((definition) => definition.type).sort()).toEqual(
+      nodeContractSnapshot.map((contract) => contract.nodeType).sort(),
+    );
+  });
   it("provides a standalone note for canvas instructions", () => {
     const note = createNode("note", { x: 40, y: 80 });
     expect(note).toMatchObject({
@@ -32,6 +38,17 @@ describe("stage two node catalogue", () => {
       expect.objectContaining({id:"input_a"}),
       expect.objectContaining({id:"input_b"}),
     ]);
+  });
+
+  it("ships no-code power data nodes with typed ports and runnable defaults", () => {
+    for (const type of ["map_fields", "validate_schema", "text_template", "hash_data"] as const) {
+      const definition = definitionFor(type);
+      expect(definition.group === "Data" || definition.group === "Logic").toBe(true);
+      expect(definition.inputs.length).toBeGreaterThan(0);
+      expect(definition.outputs.length).toBeGreaterThan(0);
+      expect(definition.sideEffect).toBe(false);
+      expect(createNode(type, { x: 0, y: 0 }).configuration).toEqual(expect.any(Object));
+    }
   });
 
   it("exposes the complete managed Chromium action set", () => {

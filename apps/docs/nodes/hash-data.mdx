@@ -1,0 +1,97 @@
+---
+title: "Hash Data"
+description: "Create a deterministic SHA-256 digest of JSON data. Exact configuration, ports, placement, and execution behavior."
+icon: "braces"
+---
+
+**Node type:** `hash_data` · **Version:** `1` · **Category:** Data
+
+Create a deterministic SHA-256 digest of JSON data. This node is not marked with the catalogue's generic side-effect flag. That classification is not a guarantee that every configured operation is read-only; review the concrete action and its destination.
+
+## When to use this node
+
+- Create a deterministic SHA-256 fingerprint for JSON-compatible data.
+- Compare content without carrying the complete value into a later decision.
+
+## Example: Fingerprint a normalized record
+
+Hash one stable object after field mapping.
+
+
+```json title="Example settings"
+{
+  "encoding": "hex"
+}
+```
+
+This shows the important settings, not a complete exported node.
+
+
+1. Normalize volatile or unordered source fields first.
+2. Connect the value to Hash Data.
+3. Store or compare the digest while retaining the original only when needed.
+
+
+## Configuration
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `encoding` | string | `"hex"` | Digest output encoding. The current node emits lowercase hexadecimal SHA-256. |
+
+
+
+## Workflow JSON
+
+The editor stores this node with the following implemented default configuration:
+
+```json title="Default node configuration"
+{
+  "type": "hash_data",
+  "version": 1,
+  "configuration": {
+    "encoding": "hex"
+  }
+}
+```
+
+Values may be entered literally or mapped from an earlier compatible output when the inspector exposes a mapping control. See [Variables and data mapping](/workflows/variables-and-data).
+
+## Inputs
+
+| Port | Type | Required | Description |
+| --- | --- | --- | --- |
+| `input` | `any` | Yes | Value |
+
+## Outputs
+
+| Port | Type | Required | Description |
+| --- | --- | --- | --- |
+| `hash` | `string` | No | SHA-256 hash |
+| `bytes` | `number` | No | Canonical bytes |
+
+## Execution behavior
+
+- Objects are canonicalized before hashing so property insertion order does not change the digest.
+- The node returns a lowercase hexadecimal digest and the canonical byte count.
+- The editor catalogue declares `hash` (string), `bytes` (number) for mapping. The execution inspector can contain additional evidence fields; inspect a real result before selecting nested paths from object or any outputs.
+
+## Common issues
+
+- Semantically different types produce different digests; string 1 and number 1 are not interchangeable.
+- A hash is an integrity fingerprint, not encryption or secret storage.
+
+
+## Where it can run
+
+- Desktop local runner
+- Paired self-hosted runner
+- Hosted runner
+
+## Test and inspect
+
+Use **Test node** in the editor to preview this step with the current configuration. A full run records resolved inputs, outputs, logs, duration, and any artifacts in the execution inspector. Side-effecting or destructive nodes can require an additional confirmation or approved workflow permission.
+
+## Related guides
+
+- [JSON data](/files-and-data/json)
+- [Data types](/reference/data-types)

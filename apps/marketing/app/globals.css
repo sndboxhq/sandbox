@@ -493,6 +493,19 @@ a { -webkit-tap-highlight-color: transparent; }
 .release li { color: var(--muted); font-size: 12px; line-height: 1.7; }
 .release ul { padding-left: 18px; }
 .release a { min-height: 44px; margin-top: 25px; display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: 11px; font-weight: 680; }
+.release-intro { max-width: 720px; margin: 24px 0 0; font-size: 15px !important; line-height: 1.65 !important; }
+.release-sections { margin-top: 54px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 42px; }
+.release-sections section { padding: 25px 0 27px; border-top: 1px solid var(--line); }
+.release-sections h3,
+.release-compatibility h3,
+.release-availability h3 { margin: 0 0 14px; }
+.release-sections ul,
+.release-compatibility ul { margin: 0; }
+.release-sections li + li,
+.release-compatibility li + li { margin-top: 8px; }
+.release-compatibility,
+.release-availability { margin-top: 28px; padding-top: 25px; border-top: 1px solid var(--line); }
+.release-availability p { max-width: 680px; }
 
 .legal-page {
   max-width: 1180px;
@@ -581,6 +594,7 @@ a { -webkit-tap-highlight-color: transparent; }
   .plugin-head { grid-template-columns: 50px minmax(0, 1fr); }
   .plugin-head > a { grid-column: 2; width: max-content; }
   .release { grid-template-columns: 1fr; gap: 45px; }
+  .release-sections { grid-template-columns: 1fr; }
   .legal-layout { grid-template-columns: 1fr; gap: 42px; }
   .legal-toc { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .legal-toc strong { grid-column: 1 / -1; }

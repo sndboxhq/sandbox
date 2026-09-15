@@ -32,12 +32,18 @@ import { useToast } from "./ui/Toast";
 
 const workspaceStorageKey = "sandbox.cloud.workspace";
 const deviceStorageKey = "sandbox.cloud.device";
+let transientDeviceId: string | undefined;
+
+const readLocal = (key: string): string => { try { return localStorage.getItem(key) ?? ""; } catch { return ""; } };
+const writeLocal = (key: string, value: string): void => { try { localStorage.setItem(key, value); } catch { /* cloud remains usable for this session */ } };
+const removeLocal = (key: string): void => { try { localStorage.removeItem(key); } catch { /* optional navigation state */ } };
 
 function deviceId(): string {
-  const existing = localStorage.getItem(deviceStorageKey);
+  const existing = readLocal(deviceStorageKey) || transientDeviceId;
   if (existing) return existing;
   const created = crypto.randomUUID();
-  localStorage.setItem(deviceStorageKey, created);
+  transientDeviceId = created;
+  writeLocal(deviceStorageKey, created);
   return created;
 }
 
@@ -47,7 +53,7 @@ export function CloudView() {
   const [status, setStatus] = useState<AccountStatus>();
   const [organisations, setOrganisations] = useState<AccountOrganisation[]>([]);
   const [workspaceId, setWorkspaceId] = useState(
-    () => localStorage.getItem(workspaceStorageKey) ?? "",
+    () => readLocal(workspaceStorageKey),
   );
   const [cloudWorkflows, setCloudWorkflows] = useState<CloudWorkflow[]>([]);
   const [approvals, setApprovals] = useState<CloudWorkflowApproval[]>([]);
@@ -88,7 +94,7 @@ export function CloudView() {
         ? workspaceId
         : (available[0]?.id ?? "");
       setWorkspaceId(selected);
-      if (selected) localStorage.setItem(workspaceStorageKey, selected);
+      if (selected) writeLocal(workspaceStorageKey, selected);
     } catch (value) {
       setError(String(value));
     } finally {
@@ -138,9 +144,9 @@ export function CloudView() {
   }, [loadRemote, status?.signedIn, workspaceId]);
   useEffect(() => {
     const openSection = (section?: string) => {
-      const value = section ?? localStorage.getItem("sandbox.cloud.section.v1") ?? undefined;
+      const value = section ?? (readLocal("sandbox.cloud.section.v1") || undefined);
       if (!value) return;
-      localStorage.removeItem("sandbox.cloud.section.v1");
+      removeLocal("sandbox.cloud.section.v1");
       window.setTimeout(() => document.getElementById(`cloud-${value}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
     };
     const event = (value: Event) => openSection((value as CustomEvent<string>).detail);
@@ -154,11 +160,11 @@ export function CloudView() {
     void listen("account-session-updated", () => {
       setLoading(true);
       void loadAccount();
-    }).then((stop) => stops.push(stop));
+    }).then((stop) => stops.push(stop)).catch((value) => setError(`Account refresh listener unavailable: ${String(value)}`));
     void listen<string>("account-session-error", (event) => {
       setError(event.payload);
       setBusy(undefined);
-    }).then((stop) => stops.push(stop));
+    }).then((stop) => stops.push(stop)).catch((value) => setError(`Account error listener unavailable: ${String(value)}`));
     return () => stops.forEach((stop) => stop());
   }, [loadAccount]);
 
@@ -196,7 +202,7 @@ export function CloudView() {
       setOrganisations([created]);
       const selected = created.workspaces[0]?.id ?? "";
       setWorkspaceId(selected);
-      if (selected) localStorage.setItem(workspaceStorageKey, selected);
+      if (selected) writeLocal(workspaceStorageKey, selected);
       toast.push("Organisation and default workspace created.", "success");
     } catch (value) {
       setError(String(value));
@@ -404,7 +410,7 @@ export function CloudView() {
                   value={workspaceId}
                   onChange={(event) => {
                     setWorkspaceId(event.target.value);
-                    localStorage.setItem(workspaceStorageKey, event.target.value);
+                    writeLocal(workspaceStorageKey, event.target.value);
                   }}
                 >
                   {organisations.map((organisation) => (

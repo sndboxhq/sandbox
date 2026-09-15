@@ -47,7 +47,7 @@ export function DownloadsClient({ manifest }: { manifest?: ReleaseManifest }) {
   const artifact = findArtifact(manifest, selected);
   const linuxRunner = selected === "linux-x64" || selected === "linux-arm64";
   const unsignedWindowsBeta = selected === "windows" && manifest?.channel === "beta";
-  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "v0.7.10-beta.2";
+  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "v0.8.0-beta.1";
 
   async function copyChecksum() {
     if (!artifact) return;
@@ -193,7 +193,7 @@ function platformIcon(platform: PlatformId) {
 
 function verificationLabel(platform: PlatformId, manifest: ReleaseManifest | undefined, unsignedWindowsBeta: boolean) {
   if (platform === "windows") {
-    if (unsignedWindowsBeta) return "SHA-256 checksum · unsigned beta";
+    if (unsignedWindowsBeta) return "Unsigned test build · SHA-256 checksum";
     return manifest ? "Authenticode signature + SHA-256" : "Declared on publication";
   }
   return "Sigstore bundle + SHA-256";

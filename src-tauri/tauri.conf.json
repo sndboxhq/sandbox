@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "sndbox",
-  "version": "0.7.10-beta.2",
+  "version": "0.8.0-beta.1",
   "identifier": "com.sandbox.automation",
   "build": {
     "beforeDevCommand": "npm.cmd run dev",
@@ -32,6 +32,12 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "fileAssociations": [{
+      "ext": ["sndbox"],
+      "name": "sndbox workflow",
+      "description": "sndbox workflow package",
+      "mimeType": "application/x-sndbox"
+    }],
     "resources": {
       "../browser-sidecar/dist/": "browser-sidecar/dist/",
       "../browser-sidecar/runtime/": "browser-sidecar/runtime/",

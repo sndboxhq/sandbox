@@ -1,0 +1,2603 @@
+[
+  {
+    "nodeType": "aggregate",
+    "version": 1,
+    "displayName": "Aggregate",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "items",
+        "label": "Items",
+        "type": "array",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "value",
+        "label": "Aggregate",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "ai_prompt",
+    "version": 1,
+    "displayName": "AI",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local"
+    ],
+    "requirements": [
+      "ai_connection"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "approval",
+    "version": 1,
+    "displayName": "Manual Approval",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "click_element",
+    "version": 1,
+    "displayName": "Click Element",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "close_browser",
+    "version": 1,
+    "displayName": "Close Browser",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "code",
+    "version": 1,
+    "displayName": "Code / Source (legacy)",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "code",
+        "label": "Source code",
+        "type": "string",
+        "required": false
+      },
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "compare_previous",
+    "version": 1,
+    "displayName": "Compare With Previous",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "condition",
+    "version": 1,
+    "displayName": "Condition",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "left",
+        "label": "Value",
+        "type": "any",
+        "required": true
+      },
+      {
+        "key": "right",
+        "label": "Compare with",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "boolean",
+        "required": false
+      }
+    ],
+    "branches": [
+      "true",
+      "false"
+    ],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "copy_path",
+    "version": 1,
+    "displayName": "Copy File or Folder",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "custom_function",
+    "version": 1,
+    "displayName": "Custom Function",
+    "kind": "action",
+    "inputs": [],
+    "outputs": [],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "custom_function",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "delay",
+    "version": 1,
+    "displayName": "Delay",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "delete_path",
+    "version": 1,
+    "displayName": "Delete File or Folder",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "destructive",
+    "retrySafety": "unsafe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "desktop_notification",
+    "version": 1,
+    "displayName": "Desktop Notification",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "discord_embed",
+    "version": 1,
+    "displayName": "Discord Embed",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [
+      "discord_connection"
+    ],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "discord_webhook",
+    "version": 1,
+    "displayName": "Discord Webhook",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [
+      "discord_connection"
+    ],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "download_file",
+    "version": 1,
+    "displayName": "Download File",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "extract_data",
+    "version": 1,
+    "displayName": "Extract Data",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "file_watch_trigger",
+    "version": 1,
+    "displayName": "File Watch Trigger",
+    "kind": "trigger",
+    "inputs": [],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "fill_field",
+    "version": 1,
+    "displayName": "Fill Field",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "filter",
+    "version": 1,
+    "displayName": "Filter",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "items",
+        "label": "Items",
+        "type": "array",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "output",
+        "label": "Retained",
+        "type": "array",
+        "required": false
+      },
+      {
+        "key": "rejected",
+        "label": "Rejected",
+        "type": "array",
+        "required": false
+      }
+    ],
+    "branches": [
+      "output",
+      "rejected"
+    ],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "get_workflow_state",
+    "version": 1,
+    "displayName": "Get Workflow State",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "gmail_add_label",
+    "version": 1,
+    "displayName": "Add Gmail Label",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [
+      "gmail_connection"
+    ],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "gmail_create_draft",
+    "version": 1,
+    "displayName": "Create Gmail Draft",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [
+      "gmail_connection"
+    ],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "gmail_get_email",
+    "version": 1,
+    "displayName": "Get Email",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [
+      "gmail_connection"
+    ],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "gmail_new_email_trigger",
+    "version": 1,
+    "displayName": "New Email",
+    "kind": "trigger",
+    "inputs": [],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [
+      "gmail_connection"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "gmail_send_email",
+    "version": 1,
+    "displayName": "Send Email",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [
+      "gmail_connection"
+    ],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "hash_data",
+    "version": 1,
+    "displayName": "Hash Data",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Value",
+        "type": "any",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "hash",
+        "label": "SHA-256 hash",
+        "type": "string",
+        "required": false
+      },
+      {
+        "key": "bytes",
+        "label": "Canonical bytes",
+        "type": "number",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {
+        "stable": true
+      }
+    }
+  },
+  {
+    "nodeType": "http_request",
+    "version": 1,
+    "displayName": "HTTP Request",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "url",
+        "label": "URL",
+        "type": "string",
+        "required": true
+      },
+      {
+        "key": "body",
+        "label": "Body",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "status",
+        "label": "Status",
+        "type": "number",
+        "required": false
+      },
+      {
+        "key": "body",
+        "label": "Body",
+        "type": "any",
+        "required": false
+      },
+      {
+        "key": "finalUrl",
+        "label": "Final URL",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "javascript_code",
+    "version": 1,
+    "displayName": "JavaScript Code",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input items",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "items",
+        "label": "Output items",
+        "type": "array",
+        "required": false
+      },
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "list_folder",
+    "version": 1,
+    "displayName": "List Folder",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "loop_over_items",
+    "version": 1,
+    "displayName": "Loop Over Items",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "items",
+        "label": "Items",
+        "type": "array",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "loop",
+        "label": "Loop",
+        "type": "array",
+        "required": false
+      },
+      {
+        "key": "done",
+        "label": "Done",
+        "type": "array",
+        "required": false
+      }
+    ],
+    "branches": [
+      "loop",
+      "done"
+    ],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "manual_trigger",
+    "version": 1,
+    "displayName": "Manual Trigger",
+    "kind": "trigger",
+    "inputs": [],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "map_fields",
+    "version": 1,
+    "displayName": "Map Fields",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input object",
+        "type": "object",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "value",
+        "label": "Mapped object",
+        "type": "object",
+        "required": false
+      },
+      {
+        "key": "mappedCount",
+        "label": "Mapped fields",
+        "type": "number",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "configuration": {
+        "mappings": [
+          {
+            "required": true,
+            "source": "first_name",
+            "target": "name"
+          }
+        ]
+      },
+      "input": {
+        "first_name": "Ada"
+      }
+    }
+  },
+  {
+    "nodeType": "merge",
+    "version": 1,
+    "displayName": "Merge",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input_a",
+        "label": "Input A",
+        "type": "array",
+        "required": true
+      },
+      {
+        "key": "input_b",
+        "label": "Input B",
+        "type": "array",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "output",
+        "label": "Merged",
+        "type": "array",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "move_file",
+    "version": 1,
+    "displayName": "Move File",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "navigate",
+    "version": 1,
+    "displayName": "Navigate",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "note",
+    "version": 1,
+    "displayName": "Note",
+    "kind": "annotation",
+    "inputs": [],
+    "outputs": [],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "note",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "open_browser",
+    "version": 1,
+    "displayName": "Open Browser",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "parse_csv",
+    "version": 1,
+    "displayName": "Parse CSV",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "parse_json",
+    "version": 1,
+    "displayName": "Parse JSON",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "parse_text",
+    "version": 1,
+    "displayName": "Parse Text",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "press_key",
+    "version": 1,
+    "displayName": "Press Key",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "python_code",
+    "version": 1,
+    "displayName": "Python Code",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input items",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "items",
+        "label": "Output items",
+        "type": "array",
+        "required": false
+      },
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "read_file",
+    "version": 1,
+    "displayName": "Read File",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "remove_duplicates",
+    "version": 1,
+    "displayName": "Remove Duplicates",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "items",
+        "label": "Items",
+        "type": "array",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "output",
+        "label": "Unique",
+        "type": "array",
+        "required": false
+      },
+      {
+        "key": "duplicates",
+        "label": "Duplicates",
+        "type": "array",
+        "required": false
+      }
+    ],
+    "branches": [
+      "output",
+      "duplicates"
+    ],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "run_command",
+    "version": 1,
+    "displayName": "Run Command",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "destructive",
+    "retrySafety": "unsafe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "schedule_trigger",
+    "version": 1,
+    "displayName": "Schedule Trigger",
+    "kind": "trigger",
+    "inputs": [],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "screenshot",
+    "version": 1,
+    "displayName": "Screenshot",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "read",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "select_option",
+    "version": 1,
+    "displayName": "Select Option",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "set_data",
+    "version": 1,
+    "displayName": "Set Data",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "values",
+        "label": "Object",
+        "type": "object",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "value",
+        "label": "Object",
+        "type": "object",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "set_workflow_state",
+    "version": 1,
+    "displayName": "Set Workflow State",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "slack_webhook",
+    "version": 1,
+    "displayName": "Slack Webhook",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [
+      "slack_connection"
+    ],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "split_out",
+    "version": 1,
+    "displayName": "Split Out",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "items",
+        "label": "Items",
+        "type": "array",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "output",
+        "label": "Items",
+        "type": "array",
+        "required": false
+      },
+      {
+        "key": "rejected",
+        "label": "Rejected",
+        "type": "array",
+        "required": false
+      }
+    ],
+    "branches": [
+      "output",
+      "rejected"
+    ],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "switch",
+    "version": 1,
+    "displayName": "Switch",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "items",
+        "label": "Items",
+        "type": "array",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "fallback",
+        "label": "Fallback",
+        "type": "array",
+        "required": false
+      }
+    ],
+    "branches": [
+      "fallback"
+    ],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "text_template",
+    "version": 1,
+    "displayName": "Text Template",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Template data",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "text",
+        "label": "Rendered text",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "configuration": {
+        "template": "Hello {{input.name}}"
+      },
+      "input": {
+        "name": "Ada"
+      }
+    }
+  },
+  {
+    "nodeType": "upload_file",
+    "version": 1,
+    "displayName": "Upload File",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "validate_schema",
+    "version": 1,
+    "displayName": "Validate Schema",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Value",
+        "type": "any",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "isValid",
+        "label": "Is valid",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "key": "value",
+        "label": "Value",
+        "type": "any",
+        "required": false
+      },
+      {
+        "key": "errors",
+        "label": "Errors",
+        "type": "array",
+        "required": false
+      }
+    ],
+    "branches": [
+      "valid",
+      "invalid"
+    ],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": true,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "configuration": {
+        "rules": [
+          {
+            "path": "id",
+            "required": true,
+            "type": "number"
+          }
+        ]
+      },
+      "input": {
+        "id": 1
+      }
+    }
+  },
+  {
+    "nodeType": "wait_for",
+    "version": 1,
+    "displayName": "Wait For",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "managed_browser"
+    ],
+    "requirements": [
+      "browser_runtime"
+    ],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "web_builder",
+    "version": 1,
+    "displayName": "Web Builder",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "html",
+        "label": "HTML",
+        "type": "string",
+        "required": true
+      },
+      {
+        "key": "javascript",
+        "label": "JavaScript",
+        "type": "string",
+        "required": true
+      },
+      {
+        "key": "css",
+        "label": "CSS",
+        "type": "string",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "url",
+        "label": "Localhost URL",
+        "type": "string",
+        "required": false
+      },
+      {
+        "key": "port",
+        "label": "Port",
+        "type": "number",
+        "required": false
+      },
+      {
+        "key": "status",
+        "label": "Server status",
+        "type": "string",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local"
+    ],
+    "requirements": [],
+    "effectLevel": "pure",
+    "retrySafety": "safe",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  },
+  {
+    "nodeType": "write_file",
+    "version": 1,
+    "displayName": "Write File",
+    "kind": "action",
+    "inputs": [
+      {
+        "key": "input",
+        "label": "Input",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "key": "result",
+        "label": "Result",
+        "type": "any",
+        "required": false
+      }
+    ],
+    "branches": [],
+    "configurationSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "placements": [
+      "local",
+      "paired_runner",
+      "hosted_runner"
+    ],
+    "requirements": [],
+    "effectLevel": "write",
+    "retrySafety": "idempotency_required",
+    "customizable": false,
+    "inspectorStrategy": "builtin",
+    "testFixture": {
+      "input": {},
+      "items": []
+    }
+  }
+]

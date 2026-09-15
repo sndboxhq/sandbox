@@ -37,7 +37,7 @@ describe("connected node roles", () => {
 
 const workflow = (): Workflow => ({
   id: "site-workflow",
-  schemaVersion: 4,
+  schemaVersion: 7,
   name: "Local site",
   description: "",
   enabled: true,
@@ -111,6 +111,26 @@ describe("Web Builder graph inputs", () => {
       nodeId: "js",
       path: ["code"],
     });
+  });
+
+  it("assembles all three source blocks directly without a Merge node", () => {
+    let next = workflow();
+    for (const [source, targetHandle] of [["html", "html"], ["js", "javascript"], ["css", "css"]] as const) {
+      next = connectWorkflowNodes(next, { source, target: "site", sourceHandle: "code", targetHandle })!;
+    }
+    expect(next.edges).toHaveLength(3);
+    expect(next.nodes.some((node) => node.type === "merge")).toBe(false);
+    expect(Object.keys(next.nodes.find((node) => node.id === "site")!.inputBindings!)).toEqual([
+      "html", "javascript", "css",
+    ]);
+  });
+
+  it("accepts dedicated JavaScript nodes only when they provide source", () => {
+    const current = workflow();
+    current.nodes.push({ id: "dedicated-js", type: "javascript_code", version: 1, name: "JS", position: { x: 0, y: 0 }, configuration: { language: "javascript", sourceCode: "alert(1)", executionMode: "source" }, disabled: false });
+    expect(isValidWorkflowConnection(current, { source: "dedicated-js", target: "site", sourceHandle: "code", targetHandle: "javascript" })).toBe(true);
+    current.nodes.at(-1)!.configuration.executionMode = "run";
+    expect(isValidWorkflowConnection(current, { source: "dedicated-js", target: "site", sourceHandle: "result", targetHandle: "javascript" })).toBe(false);
   });
 
   it("clears the generated binding when its visual connection is removed", () => {

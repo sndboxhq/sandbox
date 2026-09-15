@@ -1,0 +1,113 @@
+---
+title: "Validate Schema"
+description: "Route data by required fields and sndbox value types. Exact configuration, ports, placement, and execution behavior."
+icon: "git-branch"
+---
+
+**Node type:** `validate_schema` · **Version:** `1` · **Category:** Logic
+
+Route data by required fields and sndbox value types. This node is not marked with the catalogue's generic side-effect flag. That classification is not a guarantee that every configured operation is read-only; review the concrete action and its destination.
+
+## When to use this node
+
+- Check required fields and value types before processing external data.
+- Route valid and invalid values through visible branches.
+
+## Example: Validate an imported record
+
+Require a numeric id while allowing other fields to pass through.
+
+
+```json title="Example settings"
+{
+  "rules": [
+    {
+      "path": "id",
+      "type": "number",
+      "required": true
+    }
+  ],
+  "allowAdditionalFields": true
+}
+```
+
+This shows the important settings, not a complete exported node. Local paths must be selected, mapped from a trusted path, or covered by the runner's approved boundary.
+
+
+1. Connect the value that crosses the trust boundary.
+2. Describe each required path and exact sndbox type.
+3. Connect both Valid and Invalid branches deliberately.
+
+
+## Configuration
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `rules` | array | `[{"path":"","type":"any","required":true}]` | Ordered field-path, type, and required-value checks. |
+| `allowAdditionalFields` | boolean | `true` | Permit fields that are not named by a validation rule. |
+
+
+
+## Workflow JSON
+
+The editor stores this node with the following implemented default configuration:
+
+```json title="Default node configuration"
+{
+  "type": "validate_schema",
+  "version": 1,
+  "configuration": {
+    "rules": [
+      {
+        "path": "",
+        "type": "any",
+        "required": true
+      }
+    ],
+    "allowAdditionalFields": true
+  }
+}
+```
+
+Values may be entered literally or mapped from an earlier compatible output when the inspector exposes a mapping control. See [Variables and data mapping](/workflows/variables-and-data).
+
+## Inputs
+
+| Port | Type | Required | Description |
+| --- | --- | --- | --- |
+| `input` | `any` | Yes | Value |
+
+## Outputs
+
+| Port | Type | Required | Description |
+| --- | --- | --- | --- |
+| `isValid` | `boolean` | No | Is valid |
+| `value` | `any` | No | Value |
+| `errors` | `array` | No | Errors |
+
+## Execution behavior
+
+- Validation reports a boolean, the original value, and bounded field errors.
+- Invalid data follows the Invalid branch instead of relying on coercion.
+- The editor catalogue declares `isValid` (boolean), `value` (any), `errors` (array) for mapping. The execution inspector can contain additional evidence fields; inspect a real result before selecting nested paths from object or any outputs.
+
+## Common issues
+
+- The string "1" is not the number 1.
+- Disable additional fields only when the complete accepted shape is represented by rules.
+
+
+## Where it can run
+
+- Desktop local runner
+- Paired self-hosted runner
+- Hosted runner
+
+## Test and inspect
+
+Use **Test node** in the editor to preview this step with the current configuration. A full run records resolved inputs, outputs, logs, duration, and any artifacts in the execution inspector. Side-effecting or destructive nodes can require an additional confirmation or approved workflow permission.
+
+## Related guides
+
+- [Data types](/reference/data-types)
+- [Branches and conditions](/workflows/branches-and-conditions)

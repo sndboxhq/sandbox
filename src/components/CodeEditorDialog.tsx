@@ -84,6 +84,9 @@ export function CodeEditorDialog({
       const ai = items.filter((item) => AI_PROVIDERS.has(item.provider) && item.status === "connected");
       setConnections(ai);
       setConnectionId((current) => ai.some((item) => item.id === current) ? current : (ai[0]?.id ?? ""));
+    }).catch(() => {
+      setConnections([]);
+      setConnectionId("");
     });
   }, [open]);
   useEffect(() => {

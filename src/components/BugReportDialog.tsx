@@ -37,7 +37,7 @@ export function BugReportDialog({
         ? {
             ...draft,
             diagnostics: {
-              "App version": "v0.7.10-beta.2",
+              "App version": "v0.8.0-beta.1",
               View: currentView,
               Platform: navigator.platform || "Unknown",
               Locale: navigator.language,

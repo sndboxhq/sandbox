@@ -22,14 +22,33 @@ export default function Page() {
           <span>{launchRelease.date}</span>
         </aside>
         <div>
-          <h2>Current source snapshot</h2>
-          <p>{launchRelease.summary}</p>
-          <h3>Release availability</h3>
-          <p>
-            No public artifact is attached to this source state. sndbox therefore
-            does not present this version as a downloadable release.
-          </p>
-          <Link href="/downloads">Check available builds <ArrowRight size={13} /></Link>
+          <h2>{launchRelease.title}</h2>
+          <p className="release-intro">{launchRelease.summary}</p>
+          <div className="release-sections">
+            {launchRelease.sections.map((section) => (
+              <section key={section.title}>
+                <h3>{section.title}</h3>
+                <ul>
+                  {section.items.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </section>
+            ))}
+          </div>
+          <section className="release-compatibility">
+            <h3>Compatibility notes</h3>
+            <ul>
+              {launchRelease.compatibility.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </section>
+          <section className="release-availability">
+            <h3>Release availability</h3>
+            <p>
+              These notes describe the current v8 beta source. No public artifact
+              is attached to this repository state, so sndbox does not present
+              this version as a downloadable release yet.
+            </p>
+            <Link href="/downloads">Check available builds <ArrowRight size={13} /></Link>
+          </section>
         </div>
       </article>
     </main>

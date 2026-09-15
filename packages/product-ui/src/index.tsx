@@ -22,6 +22,7 @@ export type ProductNodeStatus =
   | "waiting"
   | "running"
   | "successful"
+  | "handled"
   | "failed"
   | "skipped"
   | "cancelled";
@@ -48,6 +49,7 @@ export type ProductWorkflowNodeProps = {
   connectionRole?: "input" | "output" | "both";
   dimmed?: boolean;
   itemCount?: number;
+  fxBadge?: boolean;
 };
 
 export function ProductWorkflowNode({
@@ -72,6 +74,7 @@ export function ProductWorkflowNode({
   connectionRole,
   dimmed = false,
   itemCount,
+  fxBadge = false,
 }: ProductWorkflowNodeProps) {
   return (
     <div
@@ -121,7 +124,7 @@ export function ProductWorkflowNode({
         <Handle type="target" position={Position.Left} id="input" className="node-handle" />
       ) : null}
       <div className="node-top">
-        <span className="node-icon"><Icon aria-hidden="true" size={15} /></span>
+        <span className="node-icon"><Icon aria-hidden="true" size={15} />{fxBadge && <span className="node-fx-badge" aria-label="Custom function">ƒx</span>}</span>
         <span className={`node-state state-${status}`} />
         {warning && <AlertTriangle className={`node-warning node-warning-${warningTone}`} aria-label={`${warningTone}: ${warning}`} size={14} />}
       </div>

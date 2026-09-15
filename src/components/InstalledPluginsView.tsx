@@ -8,7 +8,7 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { CustomSelect } from "./ui/CustomSelect";
 import type {
@@ -18,6 +18,7 @@ import type {
 } from "../types";
 import { FocusDialog } from "./ui/Dialog";
 import { IssueNotice } from "./ui/IssueNotice";
+import { ErrorState, LoadingSkeleton } from "./ui/States";
 
 const initialTrust: PackageTrustMetadata = {
   publisherId: "com.example.publisher",
@@ -35,6 +36,7 @@ export function InstalledPluginsView() {
   const [showLoader, setShowLoader] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("");
   const filteredPlugins = useMemo(
@@ -56,16 +58,20 @@ export function InstalledPluginsView() {
     [plugins, search, stateFilter],
   );
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(undefined);
     try {
       setPlugins(await api.listInstalledPlugins());
     } catch (value) {
       setError(String(value));
+    } finally {
+      setLoading(false);
     }
-  };
+  }, []);
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -147,12 +153,23 @@ export function InstalledPluginsView() {
           <option value="review">Permission review required</option>
         </CustomSelect>
       </div>
-      {error && (
+      {error && plugins.length > 0 && (
         <div className="error-banner">
-          <b>{error}</b>
+          <span>{error}</span>
+          <button className="button" onClick={() => void load()}>
+            <RefreshCcw size={13} /> Retry
+          </button>
         </div>
       )}
-      {filteredPlugins.length ? (
+      {loading && !plugins.length ? (
+        <LoadingSkeleton rows={5} />
+      ) : error && !plugins.length ? (
+        <ErrorState
+          title="Installed plugins could not load"
+          description={error}
+          onRetry={() => void load()}
+        />
+      ) : filteredPlugins.length ? (
         <section className="plugin-grid">
           {filteredPlugins.map((plugin) => {
             const approved =

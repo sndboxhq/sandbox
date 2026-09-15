@@ -100,6 +100,7 @@ const navigationGroups: NavigationGroup[] = [
           { label: "Documentation", description: "Set up, build and troubleshoot workflows.", href: `${brand.domains.docs}/getting-started`, external: true },
           { label: "Join Discord", description: "Meet the community, share workflows and get help.", href: brand.community.discord, external: true },
           { label: "Support centre", description: "Find downloads, diagnostics and human support.", href: "/support" },
+          { label: "Latest news", description: "Read product notes from the current desktop beta.", href: "/news" },
           { label: "Changelog", description: "See what changed and what to verify.", href: "/changelog" },
         ],
       },

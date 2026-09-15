@@ -1,5 +1,10 @@
 use crate::{
-    account_auth, marketplace, oauth,
+    account_auth,
+    collaboration::{
+        CollaborationSession, DecryptedCollaborationOperation, DecryptedCollaborationPresence,
+        EncryptedCollaborationOperation, EncryptedCollaborationPresence,
+    },
+    marketplace, oauth,
     plugin_manager::{PackageTrustMetadata, PluginPackageInspection},
     sync_crypto::EncryptedWorkflowRevision,
     templates, AppState,
@@ -7,17 +12,22 @@ use crate::{
 use chrono::{DateTime, Utc};
 use reqwest::Method;
 use sandbox_engine::{
+    custom_node_fingerprint, gate_node_in_workflow, node_contracts,
     validation::{validate, ValidationIssue},
-    BrowserProfile, BrowserProfileSettings, ConnectionMetadata, ConnectionStatus, ExecutionRecord,
-    InstalledPlugin, PendingApproval, PermissionSummary, StructuredLocator, Workflow,
-    WorkflowMetadataPatch, WorkflowRevisionSummary, WorkflowSummary,
+    BrowserProfile, BrowserProfileSettings, ConnectionMetadata, ConnectionStatus,
+    CustomNodeVerification, ExecutionRecord, InputBinding, InstalledPlugin, NodeContract, NodeGate,
+    PendingApproval, PermissionSummary, StructuredLocator, Workflow, WorkflowMetadataPatch,
+    WorkflowRevisionSummary, WorkflowSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::hash_map::Entry;
+use std::collections::{hash_map::Entry, HashSet};
+use std::path::Component;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
@@ -25,6 +35,7 @@ use uuid::Uuid;
 
 type Result<T> = std::result::Result<T, String>;
 const ACCOUNT_AUTH_CALLBACK_PORT: u16 = 53_682;
+const DESKTOP_INTEGRATION_KEY: &str = "desktop.integration.v1";
 
 fn err(error: impl std::fmt::Display) -> String {
     error.to_string()
@@ -70,6 +81,20 @@ pub struct CloudSyncResult {
     pub conflict_revision_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollaborationSessionHandle {
+    pub session: CollaborationSession,
+    pub invite_code: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollaborationOperationPage {
+    pub items: Vec<DecryptedCollaborationOperation>,
+    pub latest_sequence: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudWorkflowApproval {
@@ -90,9 +115,255 @@ pub struct CloudPublishResult {
     pub previous_published_revision_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopIntegrationSettings {
+    pub shortcut: String,
+    pub shortcut_enabled: bool,
+    pub start_at_login: bool,
+    pub shortcut_error: Option<String>,
+}
+
+impl Default for DesktopIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            shortcut: "Ctrl+Shift+Space".into(),
+            shortcut_enabled: true,
+            start_at_login: false,
+            shortcut_error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowImportInspection {
+    pub inspection_id: String,
+    pub source_path: String,
+    pub name: String,
+    pub description: String,
+    pub source_schema_version: u32,
+    pub node_count: usize,
+    pub required_node_types: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+pub fn initialize_desktop_integration(app: &AppHandle, database: &sandbox_engine::Database) {
+    let mut settings = database
+        .get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if settings.shortcut_enabled {
+        if let Err(error) = app.global_shortcut().register(settings.shortcut.as_str()) {
+            settings.shortcut_error = Some(format!(
+                "{} is already in use. Choose another shortcut; no replacement was registered: {error}",
+                settings.shortcut
+            ));
+        } else {
+            settings.shortcut_error = None;
+        }
+    }
+    settings.start_at_login = app
+        .autolaunch()
+        .is_enabled()
+        .unwrap_or(settings.start_at_login);
+    let _ = database.set_setting(DESKTOP_INTEGRATION_KEY, &settings);
+}
+
+pub fn show_quick_launcher(app: &AppHandle) -> std::result::Result<(), String> {
+    if let Some(window) = app.get_webview_window("quick-launcher") {
+        window.show().map_err(err)?;
+        window.unminimize().map_err(err)?;
+        window.set_focus().map_err(err)?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        app,
+        "quick-launcher",
+        WebviewUrl::App("index.html?window=quick-launcher".into()),
+    )
+    .title("sndbox quick launcher")
+    .inner_size(520.0, 420.0)
+    .min_inner_size(420.0, 320.0)
+    .resizable(true)
+    .decorations(true)
+    .always_on_top(true)
+    .build()
+    .map_err(err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_quick_launcher(app: AppHandle) -> Result<()> {
+    show_quick_launcher(&app)
+}
+
+#[tauri::command]
+pub fn reveal_workflow(workflow_id: String, app: AppHandle) -> Result<()> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "The main window is not available.".to_string())?;
+    window.show().map_err(err)?;
+    window.unminimize().map_err(err)?;
+    window.set_focus().map_err(err)?;
+    app.emit("quick-launcher-workflow", workflow_id)
+        .map_err(err)?;
+    if let Some(launcher) = app.get_webview_window("quick-launcher") {
+        let _ = launcher.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn desktop_integration_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DesktopIntegrationSettings> {
+    let mut settings = state
+        .engine
+        .database()
+        .get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY)
+        .map_err(err)?
+        .unwrap_or_default();
+    settings.start_at_login = app
+        .autolaunch()
+        .is_enabled()
+        .unwrap_or(settings.start_at_login);
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn set_desktop_integration_settings(
+    next: DesktopIntegrationSettings,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DesktopIntegrationSettings> {
+    let previous = state
+        .engine
+        .database()
+        .get_setting::<DesktopIntegrationSettings>(DESKTOP_INTEGRATION_KEY)
+        .map_err(err)?
+        .unwrap_or_default();
+    if next.shortcut_enabled && (!previous.shortcut_enabled || next.shortcut != previous.shortcut) {
+        app.global_shortcut()
+            .register(next.shortcut.as_str())
+            .map_err(|error| {
+                format!(
+                    "Could not register '{}': {error}. The previous shortcut remains active.",
+                    next.shortcut
+                )
+            })?;
+    }
+    if previous.shortcut_enabled && (!next.shortcut_enabled || next.shortcut != previous.shortcut) {
+        let _ = app.global_shortcut().unregister(previous.shortcut.as_str());
+    }
+    if next.start_at_login {
+        app.autolaunch().enable().map_err(err)?;
+    } else {
+        app.autolaunch().disable().map_err(err)?;
+    }
+    let saved = DesktopIntegrationSettings {
+        shortcut: next.shortcut.trim().to_string(),
+        shortcut_enabled: next.shortcut_enabled,
+        start_at_login: next.start_at_login,
+        shortcut_error: None,
+    };
+    state
+        .engine
+        .database()
+        .set_setting(DESKTOP_INTEGRATION_KEY, &saved)
+        .map_err(err)?;
+    Ok(saved)
+}
+
 #[tauri::command]
 pub fn take_deep_link_requests(state: State<'_, AppState>) -> Vec<String> {
     std::mem::take(&mut *state.pending_deep_links.lock())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginStarterFile {
+    pub path: String,
+    pub contents: String,
+}
+
+#[tauri::command]
+pub async fn create_plugin_project(
+    project_name: String,
+    files: Vec<PluginStarterFile>,
+    app: AppHandle,
+) -> Result<Option<String>> {
+    if project_name.is_empty()
+        || project_name.len() > 80
+        || project_name.starts_with('.')
+        || !project_name.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
+    {
+        return Err("Project folder must use 1-80 lowercase letters, numbers, or hyphens.".into());
+    }
+    if files.is_empty()
+        || files.len() > 50
+        || files.iter().map(|file| file.contents.len()).sum::<usize>() > 2_000_000
+    {
+        return Err("The plugin starter is empty or exceeds the safe scaffold limit.".into());
+    }
+    let mut seen = HashSet::new();
+    for file in &files {
+        let path = std::path::Path::new(&file.path);
+        if file.path.is_empty()
+            || path.is_absolute()
+            || !path
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+            || !seen.insert(file.path.clone())
+        {
+            return Err(format!(
+                "Plugin starter contains an unsafe or duplicate path: {}",
+                file.path
+            ));
+        }
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let Some(selection) = app
+            .dialog()
+            .file()
+            .set_title("Choose a folder for the plugin project")
+            .blocking_pick_folder()
+        else {
+            return Ok(None);
+        };
+        let parent = selection.into_path().map_err(err)?;
+        let target = parent.join(&project_name);
+        if target.exists() {
+            return Err(format!(
+                "A file or folder named '{project_name}' already exists there."
+            ));
+        }
+        let staging = parent.join(format!(".sndbox-plugin-{}", Uuid::new_v4()));
+        std::fs::create_dir(&staging).map_err(err)?;
+        let write_result = (|| -> Result<()> {
+            for file in files {
+                let destination = staging.join(&file.path);
+                if let Some(parent) = destination.parent() {
+                    std::fs::create_dir_all(parent).map_err(err)?;
+                }
+                std::fs::write(destination, file.contents).map_err(err)?;
+            }
+            std::fs::rename(&staging, &target).map_err(err)?;
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = std::fs::remove_dir_all(&staging);
+        }
+        write_result?;
+        Ok(Some(target.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(err)?
 }
 
 #[tauri::command]
@@ -202,6 +473,39 @@ pub fn prepare_workflow_sync(
     state: State<'_, AppState>,
 ) -> Result<EncryptedWorkflowRevision> {
     prepare_workflow_sync_revision(&id, parent_revision_id, editor_device_id, &state)
+}
+
+#[tauri::command]
+pub fn prepare_workflow_collaboration_snapshot(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Workflow> {
+    if !state
+        .credential_vault
+        .exists(account_auth::ACCOUNT_VAULT_ID)
+        .map_err(err)?
+    {
+        return Err("Sign in before sharing a workflow canvas.".into());
+    }
+    let workflow = state
+        .engine
+        .database()
+        .get_workflow(&id)
+        .map_err(err)?
+        .ok_or_else(|| "Workflow no longer exists.".to_string())?;
+    let mut definition = serde_json::to_value(workflow).map_err(err)?;
+    sanitize_export_definition(
+        &mut definition,
+        &state,
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )?;
+    if contains_secret_material(&definition) {
+        return Err("Canvas sharing stopped because the workflow definition contains secret-shaped material.".into());
+    }
+    serde_json::from_value(definition)
+        .map_err(|error| format!("The safe collaboration snapshot is invalid: {error}"))
 }
 
 fn prepare_workflow_sync_revision(
@@ -353,6 +657,299 @@ pub async fn get_workspace_activity(
         None,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn start_workflow_collaboration(
+    workspace_id: String,
+    workflow_id: String,
+    device_id: String,
+    color: String,
+    state: State<'_, AppState>,
+) -> Result<CollaborationSessionHandle> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let device_id = checked_uuid(&device_id, "Device")?;
+    let color = checked_collaboration_color(&color)?;
+    let payload = control_plane_json(
+        &state,
+        Method::POST,
+        &format!("/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions"),
+        Some(json!({"deviceId":device_id,"color":color})),
+    )
+    .await?;
+    let session: CollaborationSession = serde_json::from_value(
+        payload
+            .get("session")
+            .cloned()
+            .ok_or_else(|| "The collaboration response did not contain a session.".to_string())?,
+    )
+    .map_err(|error| format!("The collaboration session response was invalid: {error}"))?;
+    if session.workspace_id != workspace_id || session.workflow_id != workflow_id {
+        return Err("The collaboration service returned a session for another workflow.".into());
+    }
+    let invite_code = state.collaboration_crypto.create_invite(
+        &workspace_id,
+        &workflow_id,
+        &session.session_id,
+    )?;
+    Ok(CollaborationSessionHandle {
+        session,
+        invite_code,
+    })
+}
+
+#[tauri::command]
+pub async fn join_workflow_collaboration(
+    invite_code: String,
+    device_id: String,
+    color: String,
+    state: State<'_, AppState>,
+) -> Result<CollaborationSessionHandle> {
+    let device_id = checked_uuid(&device_id, "Device")?;
+    let color = checked_collaboration_color(&color)?;
+    let invite = state
+        .collaboration_crypto
+        .inspect_invite(invite_code.trim())?;
+    let payload = control_plane_json(
+        &state,
+        Method::POST,
+        &format!(
+            "/v1/workspaces/{}/workflows/{}/collaboration/sessions",
+            invite.workspace_id, invite.workflow_id
+        ),
+        Some(json!({"sessionId":invite.session_id,"deviceId":device_id,"color":color})),
+    )
+    .await?;
+    let session: CollaborationSession = serde_json::from_value(
+        payload
+            .get("session")
+            .cloned()
+            .ok_or_else(|| "The collaboration response did not contain a session.".to_string())?,
+    )
+    .map_err(|error| format!("The collaboration session response was invalid: {error}"))?;
+    if session.workspace_id != invite.workspace_id
+        || session.workflow_id != invite.workflow_id
+        || session.session_id != invite.session_id
+    {
+        return Err(
+            "The collaboration service returned a different session than the invite.".into(),
+        );
+    }
+    state.collaboration_crypto.accept_invite(&invite)?;
+    Ok(CollaborationSessionHandle {
+        session,
+        invite_code: invite_code.trim().to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn append_workflow_collaboration_operation(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    base_sequence: u64,
+    client_sequence: u64,
+    operation: Value,
+    state: State<'_, AppState>,
+) -> Result<DecryptedCollaborationOperation> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let operation_id = operation
+        .get("operationId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Collaboration operation ID is required.".to_string())?;
+    let operation_id = checked_uuid(operation_id, "Collaboration operation")?;
+    if operation.get("workflowId").and_then(Value::as_str) != Some(workflow_id.as_str())
+        || operation.get("baseSequence").and_then(Value::as_u64) != Some(base_sequence)
+        || operation
+            .get("changes")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    {
+        return Err("The collaboration operation does not match this workflow or sequence, or contains no changes.".into());
+    }
+    let created_at = operation
+        .get("createdAt")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Collaboration operation timestamp is required.".to_string())?;
+    let created_at = DateTime::parse_from_rfc3339(created_at)
+        .map_err(|_| "Collaboration operation timestamp is invalid.".to_string())?
+        .with_timezone(&Utc);
+    let (encrypted_payload, payload_hash) = state.collaboration_crypto.encrypt_operation(
+        &workspace_id,
+        &workflow_id,
+        &session_id,
+        &operation_id,
+        &operation,
+    )?;
+    let payload = control_plane_json(
+        &state,
+        Method::POST,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/operations"
+        ),
+        Some(json!({
+            "operationId":operation_id,
+            "baseSequence":base_sequence,
+            "clientSequence":client_sequence,
+            "encryptedPayload":encrypted_payload,
+            "payloadHash":payload_hash,
+            "createdAt":created_at,
+        })),
+    )
+    .await?;
+    let encrypted: EncryptedCollaborationOperation =
+        serde_json::from_value(payload.get("operation").cloned().ok_or_else(|| {
+            "The collaboration response did not contain an operation.".to_string()
+        })?)
+        .map_err(|error| format!("The collaboration operation response was invalid: {error}"))?;
+    state.collaboration_crypto.decrypt_operation(
+        &workspace_id,
+        &workflow_id,
+        &session_id,
+        encrypted,
+    )
+}
+
+#[tauri::command]
+pub async fn poll_workflow_collaboration_operations(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    after: u64,
+    state: State<'_, AppState>,
+) -> Result<CollaborationOperationPage> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let payload = control_plane_json(
+        &state,
+        Method::GET,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/operations?after={after}&limit=50"
+        ),
+        None,
+    )
+    .await?;
+    let latest_sequence = payload
+        .get("latestSequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "The collaboration operation page is missing its sequence.".to_string())?;
+    let encrypted: Vec<EncryptedCollaborationOperation> = serde_json::from_value(
+        payload
+            .get("items")
+            .cloned()
+            .ok_or_else(|| "The collaboration operation page is missing its items.".to_string())?,
+    )
+    .map_err(|error| format!("The collaboration operation page was invalid: {error}"))?;
+    let items = encrypted
+        .into_iter()
+        .map(|operation| {
+            state.collaboration_crypto.decrypt_operation(
+                &workspace_id,
+                &workflow_id,
+                &session_id,
+                operation,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(CollaborationOperationPage {
+        items,
+        latest_sequence,
+    })
+}
+
+#[tauri::command]
+pub async fn update_workflow_collaboration_presence(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    device_id: String,
+    color: String,
+    presence: Value,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let device_id = checked_uuid(&device_id, "Device")?;
+    let color = checked_collaboration_color(&color)?;
+    let encrypted_presence = state.collaboration_crypto.encrypt_presence(
+        &workflow_id,
+        &session_id,
+        &device_id,
+        &presence,
+    )?;
+    control_plane_json(
+        &state,
+        Method::PUT,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/presence"
+        ),
+        Some(json!({"deviceId":device_id,"color":color,"encryptedPresence":encrypted_presence})),
+    )
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn list_workflow_collaboration_presence(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<DecryptedCollaborationPresence>> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let payload = control_plane_json(
+        &state,
+        Method::GET,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/presence"
+        ),
+        None,
+    )
+    .await?;
+    let encrypted: Vec<EncryptedCollaborationPresence> =
+        serde_json::from_value(payload.get("items").cloned().ok_or_else(|| {
+            "The collaboration presence response is missing its items.".to_string()
+        })?)
+        .map_err(|error| format!("The collaboration presence response was invalid: {error}"))?;
+    encrypted
+        .into_iter()
+        .map(|presence| {
+            state
+                .collaboration_crypto
+                .decrypt_presence(&workflow_id, &session_id, presence)
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn leave_workflow_collaboration(
+    workspace_id: String,
+    workflow_id: String,
+    session_id: String,
+    device_id: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let workspace_id = checked_uuid(&workspace_id, "Workspace")?;
+    let workflow_id = checked_uuid(&workflow_id, "Workflow")?;
+    let session_id = checked_uuid(&session_id, "Collaboration session")?;
+    let device_id = checked_uuid(&device_id, "Device")?;
+    control_plane_json(
+        &state,
+        Method::DELETE,
+        &format!(
+            "/v1/workspaces/{workspace_id}/workflows/{workflow_id}/collaboration/sessions/{session_id}/members/{device_id}"
+        ),
+        None,
+    )
+    .await?;
+    state.collaboration_crypto.forget_session(&session_id)
 }
 
 #[tauri::command]
@@ -637,6 +1234,45 @@ pub fn save_workflow(workflow: Workflow, state: State<'_, AppState>) -> Result<W
         return Err("Workflow name and identifier are required.".into());
     }
     state.engine.database().save_workflow(workflow).map_err(err)
+}
+
+#[tauri::command]
+pub fn save_collaboration_bootstrap(
+    mut workflow: Workflow,
+    state: State<'_, AppState>,
+) -> Result<Workflow> {
+    checked_uuid(&workflow.id, "Workflow")?;
+    if workflow.name.trim().is_empty() {
+        return Err("The shared workflow name is required.".into());
+    }
+    workflow.enabled = false;
+    workflow.settings.permissions = PermissionSummary::default();
+    for node in &workflow.nodes {
+        if node.node_type == "custom_function" {
+            state
+                .engine
+                .database()
+                .clear_custom_node_verification(&workflow.id, &node.id)
+                .map_err(err)?;
+        }
+    }
+    let saved = state
+        .engine
+        .database()
+        .save_workflow(workflow)
+        .map_err(err)?;
+    state
+        .engine
+        .database()
+        .update_workflow_metadata(
+            &saved.id,
+            WorkflowMetadataPatch {
+                archived_at: Some(None),
+                ..Default::default()
+            },
+        )
+        .map_err(err)?;
+    Ok(saved)
 }
 #[tauri::command]
 pub fn list_workflow_revisions(
@@ -928,13 +1564,13 @@ pub async fn export_workflow(
         "templateMetadata": Value::Null,
         "warnings": if local_path_fields.is_empty() { Vec::<String>::new() } else { vec!["Local absolute paths were removed. Select approved files or folders after import.".to_string()] }
     });
-    let suggested = format!("{}.sandbox-workflow.json", safe_filename(&workflow.name));
+    let suggested = format!("{}.sndbox", safe_filename(&workflow.name));
     let selection = tokio::task::spawn_blocking(move || {
         app.dialog()
             .file()
             .set_title("Export workflow")
             .set_file_name(suggested)
-            .add_filter("sndbox workflow", &["json"])
+            .add_filter("sndbox workflow", &["sndbox"])
             .blocking_save_file()
     })
     .await
@@ -951,24 +1587,19 @@ pub async fn export_workflow(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
-#[tauri::command]
-pub async fn import_workflow(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Option<Workflow>> {
-    let selection = tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("Import workflow")
-            .add_filter("sndbox workflow", &["json"])
-            .blocking_pick_file()
-    })
-    .await
-    .map_err(err)?;
-    let Some(selection) = selection else {
-        return Ok(None);
-    };
-    let path = selection.into_path().map_err(err)?;
+fn is_workflow_file(path: &std::path::Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    name.ends_with(".sndbox") || name.ends_with(".sandbox-workflow.json")
+}
+
+fn prepare_workflow_import(path: &std::path::Path) -> Result<(WorkflowImportInspection, Workflow)> {
+    if !is_workflow_file(path) {
+        return Err("Choose a .sndbox or legacy .sandbox-workflow.json file.".into());
+    }
     let metadata = std::fs::metadata(&path).map_err(err)?;
     if metadata.len() > 2 * 1024 * 1024 {
         return Err("The selected workflow exceeds the 2 MB import limit.".into());
@@ -981,18 +1612,18 @@ pub async fn import_workflow(
     if contains_secret_material(&package) {
         return Err("The import contains raw secret material. Remove tokens, passwords, cookies, and webhook URLs before importing.".into());
     }
-    let schema = package
+    let source_schema_version = package
         .get("schemaVersion")
         .and_then(Value::as_u64)
         .ok_or_else(|| "The workflow export does not declare a schema version.".to_string())?
         as u32;
-    if schema > sandbox_engine::CURRENT_SCHEMA_VERSION {
+    if source_schema_version > sandbox_engine::CURRENT_SCHEMA_VERSION {
         return Err(format!(
-            "This workflow uses schema version {schema}, but this build supports up to version {}.",
+            "This workflow uses schema version {source_schema_version}, but this build supports up to version {}.",
             sandbox_engine::CURRENT_SCHEMA_VERSION
         ));
     }
-    if schema == 0 {
+    if source_schema_version == 0 {
         return Err("Workflow schema version 0 is not supported.".into());
     }
     let mut definition = package
@@ -1013,27 +1644,401 @@ pub async fn import_workflow(
     workflow.schema_version = sandbox_engine::CURRENT_SCHEMA_VERSION;
     workflow.created_at = Utc::now();
     workflow.updated_at = Utc::now();
-    workflow.settings.permissions = PermissionSummary {
-        approved_network_domains: package
-            .pointer("/requiredPermissions/networkDomains")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect(),
-        ..PermissionSummary::default()
+    workflow.settings.permissions = PermissionSummary::default();
+
+    let node_ids = workflow
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), Uuid::new_v4().to_string()))
+        .collect::<std::collections::HashMap<_, _>>();
+    workflow.trigger_node_id = node_ids
+        .get(&workflow.trigger_node_id)
+        .cloned()
+        .ok_or_else(|| {
+            "The imported trigger does not correspond to a workflow node.".to_string()
+        })?;
+    for node in &mut workflow.nodes {
+        node.id = node_ids
+            .get(&node.id)
+            .cloned()
+            .ok_or_else(|| "The import contains an invalid node identifier.".to_string())?;
+        for binding in node.input_bindings.values_mut() {
+            if let InputBinding::NodeOutput { node_id, .. } = binding {
+                *node_id = node_ids
+                    .get(node_id)
+                    .cloned()
+                    .ok_or_else(|| "An imported input refers to a missing node.".to_string())?;
+            }
+        }
+    }
+    for edge in &mut workflow.edges {
+        edge.id = Uuid::new_v4().to_string();
+        edge.source_node_id = node_ids
+            .get(&edge.source_node_id)
+            .cloned()
+            .ok_or_else(|| "An imported connection has a missing source node.".to_string())?;
+        edge.target_node_id = node_ids
+            .get(&edge.target_node_id)
+            .cloned()
+            .ok_or_else(|| "An imported connection has a missing target node.".to_string())?;
+    }
+
+    let mut required_node_types = package
+        .get("requiredNodeTypes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if required_node_types.is_empty() {
+        required_node_types = workflow
+            .nodes
+            .iter()
+            .map(|node| node.node_type.clone())
+            .collect();
+        required_node_types.sort();
+        required_node_types.dedup();
+    }
+    let mut warnings = package
+        .get("warnings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    warnings
+        .push("The imported workflow is disabled and all inherited approvals were cleared.".into());
+    if workflow
+        .nodes
+        .iter()
+        .any(|node| node.node_type == "custom_function")
+    {
+        warnings.push(
+            "Custom ƒx nodes are unverified on this device and must pass their fixtures before execution."
+                .into(),
+        );
+    }
+    let inspection = WorkflowImportInspection {
+        inspection_id: Uuid::new_v4().to_string(),
+        source_path: path.to_string_lossy().to_string(),
+        name: workflow.name.clone(),
+        description: workflow.description.clone(),
+        source_schema_version,
+        node_count: workflow.nodes.len(),
+        required_node_types,
+        warnings,
     };
-    let saved = state
-        .engine
-        .database()
-        .save_workflow(workflow)
-        .map_err(err)?;
-    Ok(Some(saved))
+    Ok((inspection, workflow))
+}
+
+#[tauri::command]
+pub async fn inspect_workflow_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<WorkflowImportInspection>> {
+    let selection = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Inspect workflow before importing")
+            .add_filter("sndbox workflow", &["sndbox", "json"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(err)?;
+    let Some(selection) = selection else {
+        return Ok(None);
+    };
+    let path = selection.into_path().map_err(err)?;
+    inspect_workflow_path_inner(&path, &state).map(Some)
+}
+
+fn inspect_workflow_path_inner(
+    path: &std::path::Path,
+    state: &State<'_, AppState>,
+) -> Result<WorkflowImportInspection> {
+    let (inspection, workflow) = prepare_workflow_import(path)?;
+    state
+        .pending_workflow_imports
+        .lock()
+        .insert(inspection.inspection_id.clone(), workflow);
+    Ok(inspection)
+}
+
+#[tauri::command]
+pub fn inspect_workflow_path(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<WorkflowImportInspection> {
+    inspect_workflow_path_inner(std::path::Path::new(&path), &state)
+}
+
+#[tauri::command]
+pub fn confirm_workflow_import(
+    inspection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Workflow> {
+    let workflow = state
+        .pending_workflow_imports
+        .lock()
+        .remove(&inspection_id)
+        .ok_or_else(|| "This import inspection expired. Inspect the file again.".to_string())?;
+    state.engine.database().save_workflow(workflow).map_err(err)
+}
+
+#[tauri::command]
+pub fn cancel_workflow_import(inspection_id: String, state: State<'_, AppState>) {
+    state.pending_workflow_imports.lock().remove(&inspection_id);
+}
+
+#[tauri::command]
+pub fn take_workflow_file_requests(state: State<'_, AppState>) -> Vec<String> {
+    std::mem::take(&mut *state.pending_workflow_files.lock())
 }
 #[tauri::command]
 pub fn validate_workflow(workflow: Workflow) -> Vec<ValidationIssue> {
     validate(&workflow)
+}
+
+#[tauri::command]
+pub fn list_node_contracts() -> Vec<NodeContract> {
+    node_contracts()
+}
+
+#[tauri::command]
+pub fn evaluate_node_gates(
+    workflow: Workflow,
+    placement: Option<String>,
+    state: State<'_, AppState>,
+) -> std::collections::BTreeMap<String, NodeGate> {
+    let placement = placement.unwrap_or_else(|| "local".into());
+    workflow
+        .nodes
+        .iter()
+        .map(|node| {
+            let mut gate = gate_node_in_workflow(node, &workflow, &placement);
+            if gate.state == sandbox_engine::GateState::Available
+                && node.node_type == "custom_function"
+            {
+                let verified = node.customization.as_ref().is_some_and(|customization| {
+                    state
+                        .engine
+                        .database()
+                        .custom_node_verification(&workflow.id, &node.id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|receipt| {
+                            receipt.fingerprint == custom_node_fingerprint(customization)
+                        })
+                });
+                if !verified {
+                    gate = NodeGate {
+                        state: sandbox_engine::GateState::Blocked,
+                        code: "custom_unverified".into(),
+                        message: "The custom function has not passed its saved fixtures for this version.".into(),
+                        remediation: Some(
+                            "Open the ƒx editor, run every fixture, and save the verified node."
+                                .into(),
+                        ),
+                    };
+                }
+            }
+            (node.id.clone(), gate)
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomFixtureResult {
+    id: String,
+    name: String,
+    passed: bool,
+    duration_ms: u64,
+    logs: Vec<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomNodeTestReport {
+    passed: bool,
+    fingerprint: String,
+    output_coverage: Vec<String>,
+    branch_coverage: Vec<String>,
+    fixtures: Vec<CustomFixtureResult>,
+    verification: Option<CustomNodeVerification>,
+}
+
+#[tauri::command]
+pub async fn test_custom_node(
+    workflow: Workflow,
+    node_id: String,
+    state: State<'_, AppState>,
+) -> Result<CustomNodeTestReport> {
+    if state
+        .engine
+        .database()
+        .get_workflow(&workflow.id)
+        .map_err(err)?
+        .is_none()
+    {
+        return Err("Save the workflow before verifying its custom node.".into());
+    }
+    let node = workflow
+        .nodes
+        .iter()
+        .find(|node| node.id == node_id)
+        .cloned()
+        .ok_or_else(|| "Custom node no longer exists.".to_string())?;
+    if node.node_type != "custom_function" {
+        return Err("Only custom ƒx nodes use the custom verification suite.".into());
+    }
+    let customization = node
+        .customization
+        .clone()
+        .ok_or_else(|| "Custom contract is missing.".to_string())?;
+    let fingerprint = custom_node_fingerprint(&customization);
+    let mut fixture_results = Vec::new();
+    let mut output_coverage = std::collections::BTreeSet::new();
+    let mut branch_coverage = std::collections::BTreeSet::new();
+    for fixture in &customization.tests {
+        let execution = state
+            .engine
+            .test_node(
+                workflow.clone(),
+                &node_id,
+                json!({"input":{"items":fixture.items},"fixtureInputs":fixture.inputs}),
+                None,
+                false,
+                CancellationToken::new(),
+            )
+            .await;
+        let (passed, duration_ms, logs, actual_error) = match execution {
+            Ok(record) => {
+                let node_run = record.node_executions.first();
+                let error_text = node_run
+                    .and_then(|run| run.error.as_ref())
+                    .map(|error| format!("{}: {}", error.code, error.message));
+                let expected_error_ok = match &fixture.expected_error {
+                    Some(expected) => error_text
+                        .as_ref()
+                        .is_some_and(|actual| actual.contains(expected)),
+                    None => error_text.is_none(),
+                };
+                let actual_output = node_run.map(|run| &run.output).unwrap_or(&Value::Null);
+                let expected_output_ok =
+                    fixture
+                        .expected_outputs
+                        .as_object()
+                        .is_some_and(|expected| {
+                            expected
+                                .iter()
+                                .all(|(key, value)| actual_output.get(key) == Some(value))
+                        });
+                let branch_counts = node_run
+                    .and_then(|run| run.collection.as_ref())
+                    .map(|collection| &collection.branch_counts);
+                let expected_branch_ok =
+                    fixture
+                        .expected_branches
+                        .as_object()
+                        .is_some_and(|expected| {
+                            expected.keys().all(|key| {
+                                branch_counts
+                                    .is_some_and(|counts| counts.get(key).copied().unwrap_or(0) > 0)
+                            })
+                        });
+                if expected_error_ok && expected_output_ok && expected_branch_ok {
+                    if let Some(expected) = fixture.expected_outputs.as_object() {
+                        output_coverage.extend(expected.keys().cloned());
+                    }
+                    if let Some(expected) = fixture.expected_branches.as_object() {
+                        branch_coverage.extend(expected.keys().cloned());
+                    }
+                }
+                (
+                    expected_error_ok && expected_output_ok && expected_branch_ok,
+                    record.duration_ms.unwrap_or(0),
+                    node_run.map(|run| run.logs.clone()).unwrap_or_default(),
+                    error_text,
+                )
+            }
+            Err(error) => {
+                let matches = fixture
+                    .expected_error
+                    .as_ref()
+                    .is_some_and(|expected| error.to_string().contains(expected));
+                (matches, 0, vec![], Some(error.to_string()))
+            }
+        };
+        fixture_results.push(CustomFixtureResult {
+            id: fixture.id.clone(),
+            name: fixture.name.clone(),
+            passed,
+            duration_ms,
+            logs,
+            error: actual_error,
+        });
+    }
+    let coverage_complete = customization
+        .outputs
+        .iter()
+        .filter(|port| port.required)
+        .all(|port| output_coverage.contains(&port.key))
+        && customization
+            .branches
+            .iter()
+            .all(|port| branch_coverage.contains(&port.key));
+    let passed = !fixture_results.is_empty()
+        && fixture_results.iter().all(|fixture| fixture.passed)
+        && coverage_complete;
+    let verification = if passed {
+        let receipt = CustomNodeVerification {
+            workflow_id: workflow.id.clone(),
+            node_id: node_id.clone(),
+            fingerprint: fingerprint.clone(),
+            passed_at: Utc::now(),
+            output_coverage: output_coverage.iter().cloned().collect(),
+            branch_coverage: branch_coverage.iter().cloned().collect(),
+            runtime_version: customization.runtime_requirement.clone(),
+        };
+        state
+            .engine
+            .database()
+            .save_custom_node_verification(&receipt)
+            .map_err(err)?;
+        Some(receipt)
+    } else {
+        state
+            .engine
+            .database()
+            .clear_custom_node_verification(&workflow.id, &node_id)
+            .map_err(err)?;
+        None
+    };
+    Ok(CustomNodeTestReport {
+        passed,
+        fingerprint,
+        output_coverage: output_coverage.into_iter().collect(),
+        branch_coverage: branch_coverage.into_iter().collect(),
+        fixtures: fixture_results,
+        verification,
+    })
+}
+
+#[tauri::command]
+pub fn get_custom_node_verification(
+    workflow_id: String,
+    node_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<CustomNodeVerification>> {
+    state
+        .engine
+        .database()
+        .custom_node_verification(&workflow_id, &node_id)
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -1382,43 +2387,69 @@ pub struct RunnerStatus {
     active_workflow_ids: Vec<String>,
     local_schedules_stop_on_quit: bool,
     scheduled_workflow_count: usize,
+    scheduled_workflows: Vec<RunnerScheduledWorkflow>,
     next_run_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunnerScheduledWorkflow {
+    workflow_id: String,
+    name: String,
+    next_run_at: Option<DateTime<Utc>>,
+    ready: bool,
+}
 #[tauri::command]
-pub fn runner_status(state: State<'_, AppState>) -> RunnerStatus {
+pub fn runner_status(state: State<'_, AppState>) -> Result<RunnerStatus> {
     let scheduled = state
         .engine
         .database()
         .list_workflows()
-        .unwrap_or_default()
+        .map_err(err)?
         .into_iter()
         .filter(|item| {
             item.workflow.enabled
-                && item
-                    .workflow
-                    .nodes
-                    .iter()
-                    .any(|node| node.node_type == "schedule_trigger")
+                && item.workflow.nodes.iter().any(|node| {
+                    node.id == item.workflow.trigger_node_id
+                        && node.node_type == "schedule_trigger"
+                        && !node.disabled
+                })
         })
         .collect::<Vec<_>>();
-    RunnerStatus {
+    let scheduled_workflows = scheduled
+        .iter()
+        .map(|item| RunnerScheduledWorkflow {
+            workflow_id: item.workflow.id.clone(),
+            name: item.workflow.name.clone(),
+            next_run_at: item.next_run_at,
+            ready: item
+                .workflow
+                .settings
+                .permissions
+                .background_execution_permitted,
+        })
+        .collect();
+    Ok(RunnerStatus {
         paused: state.paused.load(Ordering::SeqCst),
         active_workflow_ids: state.cancellations.lock().keys().cloned().collect(),
         local_schedules_stop_on_quit: true,
         scheduled_workflow_count: scheduled.len(),
-        next_run_at: scheduled
-            .into_iter()
-            .filter_map(|item| item.next_run_at)
-            .min(),
-    }
+        scheduled_workflows,
+        next_run_at: scheduled.iter().filter_map(|item| item.next_run_at).min(),
+    })
 }
 
 #[tauri::command]
-pub fn set_runner_paused(paused: bool, app: AppHandle, state: State<'_, AppState>) -> RunnerStatus {
+pub fn set_runner_paused(
+    paused: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RunnerStatus> {
+    let mut status = runner_status(state.clone())?;
     state.paused.store(paused, Ordering::SeqCst);
-    let status = runner_status(state);
+    status.paused = paused;
     let _ = app.emit("runner-status-changed", &status);
-    status
+    Ok(status)
 }
 
 #[tauri::command]
@@ -1977,6 +3008,16 @@ fn checked_uuid(value: &str, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} ID must be a UUID."))
 }
 
+fn checked_collaboration_color(value: &str) -> Result<String> {
+    if value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Ok(value.to_ascii_lowercase());
+    }
+    Err("Collaboration color must be a six-digit hexadecimal color.".into())
+}
+
 async fn control_plane_json(
     state: &AppState,
     method: Method,
@@ -2032,7 +3073,9 @@ async fn control_plane_json(
         .header("accept", "application/json")
         .header("x-correlation-id", Uuid::new_v4().to_string());
     if method != Method::GET && method != Method::HEAD {
-        request = request.header("x-idempotency-key", Uuid::new_v4().to_string());
+        request = request
+            .header("idempotency-key", Uuid::new_v4().to_string())
+            .header("x-sandbox-request-time", Utc::now().to_rfc3339());
     }
     if let Some(body) = body {
         request = request.json(&body);
@@ -2789,6 +3832,18 @@ fn sanitize_export_definition(
             .and_then(Value::as_str)
             .unwrap_or("unknown-node")
             .to_string();
+        if let Some(bindings) = node.get_mut("inputBindings").and_then(Value::as_object_mut) {
+            for binding in bindings.values_mut() {
+                if binding.get("kind").and_then(Value::as_str) == Some("connection") {
+                    if let Some(object) = binding.as_object_mut() {
+                        object.insert("connectionId".into(), Value::String(String::new()));
+                    }
+                }
+            }
+        }
+        if let Some(plugin) = node.get_mut("plugin").and_then(Value::as_object_mut) {
+            plugin.insert("credentialReferences".into(), json!({}));
+        }
         let connection_field = if node.get("type").and_then(Value::as_str) == Some("ai_prompt") {
             "connectionId"
         } else {
@@ -2880,11 +3935,13 @@ fn sanitize_export_definition(
         .and_then(Value::as_object_mut)
     {
         permissions.insert("approvedFolders".into(), json!([]));
+        permissions.insert("approvedNetworkDomains".into(), json!([]));
         permissions.insert("approvedBrowserProfileIds".into(), json!([]));
         permissions.insert("commandExecutionPermitted".into(), Value::Bool(false));
         permissions.insert("backgroundExecutionPermitted".into(), Value::Bool(false));
         permissions.insert("browserAutomationPermitted".into(), Value::Bool(false));
         permissions.insert("externalCommunicationPermitted".into(), Value::Bool(false));
+        permissions.insert("externalDataWritePermitted".into(), Value::Bool(false));
         permissions.insert("approvalRevision".into(), Value::Null);
         permissions.insert("communicationApprovalRevision".into(), Value::Null);
         permissions.insert("approvedEnvironmentVariables".into(), json!([]));
@@ -2921,7 +3978,7 @@ mod bug_report_tests {
         BugReportDraft {
             summary: "Web Builder preview stays blank".into(),
             description: "The localhost page opens, but no compiled content is displayed.".into(),
-            diagnostics: [("App version".into(), "0.7.10-beta.2".into())]
+            diagnostics: [("App version".into(), "0.8.0-beta.1".into())]
                 .into_iter()
                 .collect(),
         }
@@ -2936,7 +3993,7 @@ mod bug_report_tests {
             .as_str()
             .unwrap()
             .contains("localhost"));
-        assert_eq!(payload["diagnostics"]["App version"], "0.7.10-beta.2");
+        assert_eq!(payload["diagnostics"]["App version"], "0.8.0-beta.1");
     }
 
     #[test]

@@ -1,8 +1,8 @@
 export type BuiltInNodeType =
   | "note"
-  | "manual_trigger" | "schedule_trigger" | "file_watch_trigger" | "condition" | "filter" | "switch" | "loop_over_items" | "split_out" | "aggregate" | "merge" | "remove_duplicates" | "set_data" | "delay"
+  | "manual_trigger" | "schedule_trigger" | "file_watch_trigger" | "condition" | "filter" | "switch" | "loop_over_items" | "split_out" | "aggregate" | "merge" | "remove_duplicates" | "set_data" | "map_fields" | "validate_schema" | "text_template" | "hash_data" | "delay"
   | "http_request" | "desktop_notification" | "move_file" | "read_file" | "write_file" | "copy_path" | "delete_path" | "list_folder" | "parse_csv" | "parse_json" | "parse_text" | "get_workflow_state" | "set_workflow_state" | "compare_previous" | "run_command"
-  | "ai_prompt" | "code" | "javascript_code" | "python_code" | "web_builder"
+  | "ai_prompt" | "code" | "javascript_code" | "python_code" | "custom_function" | "web_builder"
   | "open_browser" | "navigate" | "click_element" | "fill_field" | "select_option" | "press_key"
   | "wait_for" | "extract_data" | "screenshot" | "download_file" | "upload_file" | "close_browser"
   | "gmail_new_email_trigger" | "gmail_get_email" | "gmail_create_draft" | "gmail_send_email" | "gmail_add_label"
@@ -10,25 +10,46 @@ export type BuiltInNodeType =
 // Plugin node types are publisher-defined stable strings. Keeping the built-in
 // union separately preserves autocomplete without closing the public registry.
 export type NodeType = BuiltInNodeType | (string & {});
-export type NodeStatus = "idle" | "waiting" | "running" | "successful" | "failed" | "skipped" | "cancelled";
-export type ExecutionStatus = "queued" | "running" | "successful" | "failed" | "skipped" | "cancelled";
+export type NodeStatus = "idle" | "waiting" | "running" | "successful" | "handled" | "failed" | "skipped" | "cancelled";
+export type ExecutionStatus = "queued" | "running" | "successful" | "successful_with_warnings" | "failed" | "skipped" | "cancelled";
 export interface Position { x:number; y:number }
 export interface PluginNodePin { pluginId:string; pluginVersion:string; packageIntegrity:string; publisherId:string; input?:unknown; credentialReferences?:Record<string,string> }
 export interface WorkflowOwner { ownerType:"personal"|"workspace"; ownerId:string }
 export type ValueType="any"|"string"|"number"|"boolean"|"object"|"array"|"path"|"connection";
 export interface NodePortDefinition { key:string; label:string; type:ValueType; required?:boolean; description?:string; sensitive?:boolean }
+export interface CustomNodeTest { id:string; name:string; inputs:Record<string,unknown>; items:WorkflowItem[]; expectedOutputs:Record<string,unknown>; expectedBranches:Record<string,unknown>; expectedError?:string }
+export interface NodeCustomization { sourceType:string; sourceVersion:number; sourceName:string; sourceContractHash:string; language:"javascript"|"python"; sourceCode:string; description:string; inputs:NodePortDefinition[]; outputs:NodePortDefinition[]; branches:NodePortDefinition[]; tests:CustomNodeTest[]; runtimeRequirement:string }
+export type ErrorStrategy="fail"|"route"|"fallback";
+export interface NodeErrorPolicy { strategy:ErrorStrategy; maxRetries:number; retryDelayMs:number; backoff:"fixed"|"exponential"; fallbackOutputs:unknown }
 export type InputBinding=
   | {kind:"literal";value:unknown}
   | {kind:"node_output";nodeId:string;path?:string[]}
   | {kind:"template";template:string}
   | {kind:"protected_variable";name:string}
   | {kind:"connection";connectionId:string};
-export interface WorkflowNode { id:string; type:NodeType; version:number; name:string; position:Position; configuration:Record<string,unknown>; disabled:boolean; inputBindings?:Record<string,InputBinding>; plugin?:PluginNodePin }
+export interface WorkflowNode { id:string; type:NodeType; version:number; name:string; position:Position; configuration:Record<string,unknown>; disabled:boolean; inputBindings?:Record<string,InputBinding>; plugin?:PluginNodePin; customization?:NodeCustomization; errorPolicy?:NodeErrorPolicy }
 export interface WorkflowEdge { id:string; sourceNodeId:string; sourceHandle:string; targetNodeId:string; targetHandle:string; kind?:"control"; sourcePort?:string; targetPort?:string }
 export interface PermissionSummary { approvedFolders:string[]; approvedNetworkDomains:string[]; commandExecutionPermitted:boolean; backgroundExecutionPermitted:boolean; approvalRevision?:string|null; approvedBrowserProfileIds:string[]; browserAutomationPermitted:boolean; externalCommunicationPermitted:boolean; externalDataWritePermitted?:boolean; communicationApprovalRevision?:string|null; approvedEnvironmentVariables?:string[] }
 export interface CollectionLimits { maxInputItems:number; maxResultItems:number; maxItemBytes:number; maxAggregateBytes:number; maxCartesianItems:number; maxLoopIterations:number; maxLoopConcurrency:number; maxDeduplicationKeys:number; maxHistoryItemPreviews:number }
 export interface WorkflowSettings { defaultNodeTimeoutMs:number; maxConcurrentNodes:number; permissions:PermissionSummary; expressionLanguageVersion?:number; collectionLimits?:CollectionLimits }
 export interface Workflow { id:string; schemaVersion:number; owner?:WorkflowOwner; name:string; description:string; enabled:boolean; triggerNodeId:string; nodes:WorkflowNode[]; edges:WorkflowEdge[]; settings:WorkflowSettings; createdAt:string; updatedAt:string }
+export type WorkflowCollaborationChange =
+  | { kind:"workflow_snapshot"; workflow:Omit<Workflow,"enabled"|"settings"> & {settings:Omit<WorkflowSettings,"permissions">} }
+  | { kind:"node_add"; node:WorkflowNode }
+  | { kind:"node_update"; node:WorkflowNode }
+  | { kind:"node_move"; nodeId:string; position:Position }
+  | { kind:"node_remove"; nodeId:string }
+  | { kind:"edge_add"; edge:WorkflowEdge }
+  | { kind:"edge_update"; edge:WorkflowEdge }
+  | { kind:"edge_remove"; edgeId:string }
+  | { kind:"workflow_update"; name:string; description:string; triggerNodeId:string; settings:Omit<WorkflowSettings,"permissions"> };
+export interface WorkflowCollaborationOperation { operationId:string; workflowId:string; actorId:string; baseSequence:number; createdAt:string; changes:WorkflowCollaborationChange[] }
+export interface CollaborationSession { sessionId:string; workspaceId:string; workflowId:string; latestSequence:number; joinedAt:string; expiresAt:string }
+export interface CollaborationSessionHandle { session:CollaborationSession; inviteCode:string }
+export interface DecryptedCollaborationOperation { sessionId:string; sequence:number; operationId:string; workflowId:string; actorAccountId:string; baseSequence:number; clientSequence:number; payload:WorkflowCollaborationOperation; createdAt:string; acceptedAt:string }
+export interface CollaborationOperationPage { items:DecryptedCollaborationOperation[]; latestSequence:number }
+export interface WorkflowCollaborationPresenceState { selectedNodeIds:string[]; cursor?:Position; viewport?:{x:number;y:number;zoom:number} }
+export interface DecryptedCollaborationPresence { accountId:string; deviceId:string; displayName:string; color:string; payload:WorkflowCollaborationPresenceState; lastSeenAt:string }
 export interface ExecutionError { code:string; message:string; detail?:string; suggestion?:string; line?:number; column?:number }
 export interface BinaryReference { reference:string; fileName?:string; contentType?:string; sizeBytes?:number; sha256?:string }
 export interface WorkflowItem { itemId?:string; originItemId?:string; parentItemId?:string; data:unknown; binary?:Record<string,BinaryReference>; sourceNodeId?:string; sourceItemIndex?:number; originalPosition?:number; currentPosition?:number; branch?:string; branchHistory?:string[]; loopIteration?:number; executionAttempt?:number; status?:"successful"|"filtered"|"removed"|"failed"|"retried"|"skipped"; trustedPaths?:Record<string,string>; correlations?:Record<string,string> }
@@ -45,9 +66,18 @@ export interface WorkflowMetadataPatch { favorite?:boolean; folder?:string|null;
 export interface WorkflowSummary { workflow:Workflow; metadata:WorkflowMetadata; lastExecution?:ExecutionRecord; nextRunAt?:string }
 export interface WorkflowRevisionSummary { revisionId:string; workflowId:string; parentRevisionId?:string; schemaVersion:number; contentHash:string; changeSummary:string; createdAt:string; current:boolean }
 export interface ValidationIssue { code:string; message:string; severity:"info"|"warning"|"error"; nodeId?:string; edgeId?:string; fieldPath?:string; suggestion?:string }
+export type GateState="available"|"setup_required"|"blocked";
+export interface NodeContract { nodeType:string; version:number; displayName:string; kind:"annotation"|"trigger"|"action"; inputs:NodePortDefinition[]; outputs:NodePortDefinition[]; branches:string[]; configurationSchema:Record<string,unknown>; placements:Array<"local"|"paired_runner"|"hosted_runner"|"managed_browser">; requirements:string[]; effectLevel:"pure"|"read"|"write"|"destructive"; retrySafety:"safe"|"unsafe"|"idempotency_required"; customizable:boolean; inspectorStrategy:string; testFixture:unknown }
+export interface NodeGate { state:GateState; code:string; message:string; remediation?:string }
+export interface CustomNodeVerification { workflowId:string; nodeId:string; fingerprint:string; passedAt:string; outputCoverage:string[]; branchCoverage:string[]; runtimeVersion:string }
+export interface CustomFixtureResult { id:string; name:string; passed:boolean; durationMs:number; logs:string[]; error?:string }
+export interface CustomNodeTestReport { passed:boolean; fingerprint:string; outputCoverage:string[]; branchCoverage:string[]; fixtures:CustomFixtureResult[]; verification?:CustomNodeVerification }
+export interface DesktopIntegrationSettings { shortcut:string; shortcutEnabled:boolean; startAtLogin:boolean; shortcutError?:string|null }
+export interface WorkflowImportInspection { inspectionId:string; sourcePath:string; name:string; description:string; sourceSchemaVersion:number; nodeCount:number; requiredNodeTypes:string[]; warnings:string[] }
 export interface ExecutionQuery { search?:string; workflowIds?:string[]; statuses?:ExecutionStatus[]; triggerTypes?:string[]; startedAfter?:string; startedBefore?:string; cursor?:string; limit?:number }
 export interface ExecutionPage { items:ExecutionRecord[]; nextCursor?:string }
-export interface RunnerStatus { paused:boolean; activeWorkflowIds:string[]; localSchedulesStopOnQuit:boolean; scheduledWorkflowCount:number; nextRunAt?:string }
+export interface RunnerScheduledWorkflow { workflowId:string; name:string; nextRunAt?:string; ready:boolean }
+export interface RunnerStatus { paused:boolean; activeWorkflowIds:string[]; localSchedulesStopOnQuit:boolean; scheduledWorkflowCount:number; scheduledWorkflows:RunnerScheduledWorkflow[]; nextRunAt?:string }
 export interface AccountMetadata { accountId:string; email:string; displayName:string; sessionId:string; expiresAt:string; signedInAt:string }
 export interface AccountStatus { configured:boolean; signedIn:boolean; metadata?:AccountMetadata; localWorkflowsAvailable:boolean; configurationError?:string }
 export type BuiltInRole="owner"|"administrator"|"developer"|"operator"|"viewer";

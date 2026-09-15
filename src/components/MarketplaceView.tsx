@@ -228,10 +228,7 @@ export function MarketplaceView() {
                 <button
                   className="button"
                   onClick={() => {
-                    window.sessionStorage.setItem(
-                      "sandbox:settings-section",
-                      "connections",
-                    );
+                    try { window.sessionStorage.setItem("sandbox:settings-section", "connections"); } catch { /* direct navigation still works */ }
                     setView("settings");
                   }}
                 >

@@ -14,6 +14,7 @@ import {
   type PluginNodeChoice,
 } from "../catalogue";
 import type { NodeType } from "../types";
+import { readStoredJson, writeStoredJson } from "../safeStorage";
 
 type Choice = {
   id: string;
@@ -67,33 +68,20 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const resultsRef = useRef<HTMLDivElement>(null);
-  const recent = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem(recentKey) ?? "[]") as NodeType[];
-    } catch {
-      return [];
-    }
-  }, [open]);
-  const recentCommands = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem(recentCommandKey) ?? "[]") as string[];
-    } catch {
-      return [];
-    }
-  }, [open]);
+  const recent = useMemo(() => readStoredJson<unknown[]>(recentKey, [], Array.isArray)
+    .filter((value): value is NodeType => typeof value === "string"), [open]);
+  const recentCommands = useMemo(() => readStoredJson<unknown[]>(recentCommandKey, [], Array.isArray)
+    .filter((value): value is string => typeof value === "string"), [open]);
   useEffect(() => {
     if (open) {
       setQuery("");
       setActive(0);
     }
   }, [open]);
-  const remember = (type: NodeType) =>
-    localStorage.setItem(
-      recentKey,
-      JSON.stringify(
-        [type, ...recent.filter((item) => item !== type)].slice(0, 6),
-      ),
-    );
+  const remember = (type: NodeType) => {
+    try { writeStoredJson(recentKey, [type, ...recent.filter((item) => item !== type)].slice(0, 6)); }
+    catch { /* optional command history must not block adding a node */ }
+  };
   const choices = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const all: Choice[] = [];
@@ -103,13 +91,13 @@ export function CommandPalette({
     const addNode = (type: NodeType, group: string) => {
       const node = NODE_DEFINITIONS.find((item) => item.type === type);
       if (!node) return;
-      const disabled = hasTrigger && isTrigger(type);
+      const disabled = (hasTrigger && isTrigger(type)) || type === "custom_function";
       all.push({
         id: `node-${type}`,
         group,
         name: node.name,
         description: disabled
-          ? "A workflow already has a trigger. Remove or replace it first."
+          ? type === "custom_function" ? "Create a custom version from a supported pure node so provenance and verification remain intact." : "A workflow already has a trigger. Remove or replace it first."
           : node.description,
         category: node.group,
         disabled,
@@ -211,12 +199,8 @@ export function CommandPalette({
   const activate = (index: number) => {
     const item = choices[index];
     if (item && !item.disabled) {
-      localStorage.setItem(
-        recentCommandKey,
-        JSON.stringify(
-          [item.id, ...recentCommands.filter((id) => id !== item.id)].slice(0, 8),
-        ),
-      );
+      try { writeStoredJson(recentCommandKey, [item.id, ...recentCommands.filter((id) => id !== item.id)].slice(0, 8)); }
+      catch { /* optional command history must not block the selected action */ }
       item.action();
       onClose();
     }

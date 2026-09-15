@@ -24,6 +24,7 @@ import {
   Play,
   RotateCcw,
   Save,
+  Share2,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -54,27 +55,34 @@ import {
 } from "../catalogue";
 import { usePreferences } from "../preferences";
 import { useAppStore } from "../store";
+import { repairWorkflowTriggerReference } from "../workflowTriggers";
 import { issueFingerprint, issuePriority } from "../issues";
 import { useIssueTracking } from "../issueTracking";
 import {
   connectWorkflowNodes,
   connectedNodeRoles,
+  disconnectWorkflowEdge,
   isValidWorkflowConnection,
   WEB_BUILDER_INPUT_PORTS,
 } from "../workflowConnections";
 import type {
   BrowserProfile,
+  CollaborationSessionHandle,
+  DecryptedCollaborationPresence,
   ExecutionRecord,
   InstalledPlugin,
+  NodeContract,
   NodeStatus,
   NodeType,
   PermissionSummary,
   RecordedStep,
   ValidationIssue,
   Workflow,
+  WorkflowCollaborationOperation,
   WorkflowNode,
   WorkflowRevisionSummary,
 } from "../types";
+import "../permissionReview.css";
 import { BrowserRecorder } from "./BrowserRecorder";
 import {
   AiWorkflowChat,
@@ -94,6 +102,10 @@ import { clearWorkflowDraft, draftUsesEarlierBase, readWorkflowDraft, writeWorkf
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "../workspaceState";
 import { isTextEntryTarget, useKeyboardShortcuts } from "../useKeyboardShortcuts";
 import { useAiWorkflowStore } from "../aiWorkflowStore";
+import { applyCollaborationOperation, diffCollaborativeWorkflow, parseCollaborationOperation, snapshotCollaborativeWorkflow } from "../collaboration";
+import { CollaborationDialog } from "./CollaborationDialog";
+import { collaborationDeviceColor, collaborationDeviceIdentity, collaborationSessionFor, forgetCollaborationSession, rememberCollaborationSession } from "../collaborationSession";
+import { invalidatePermissionApprovals } from "../permissionApprovals";
 
 const nodeTypes = { workflow: WorkflowNodeCard };
 const AccessibleWorkflowEditor = lazy(() =>
@@ -101,6 +113,9 @@ const AccessibleWorkflowEditor = lazy(() =>
 );
 const NodeInspector = lazy(() =>
   import("./NodeInspector").then((module) => ({ default: module.NodeInspector })),
+);
+const CustomNodeEditor = lazy(() =>
+  import("./CustomNodeEditor").then((module) => ({ default: module.CustomNodeEditor })),
 );
 const workflowNodeDimensions = { width: 194, height: 112 } as const;
 
@@ -110,7 +125,9 @@ function workflowNodeHandles(node: WorkflowNode): Node<WorkflowNodeData>["handle
   const handleSize = 9;
   const centeredHandleOffset = (workflowNodeDimensions.height - handleSize) / 2;
 
-  const configuredInputPorts = node.type === "web_builder"
+  const configuredInputPorts = node.type === "custom_function"
+    ? (node.customization?.inputs.map(port=>({id:port.key}))??[])
+    : node.type === "web_builder"
     ? WEB_BUILDER_INPUT_PORTS.map(port=>({id:port.id}))
     : node.type === "merge"
       ? ((node.configuration.inputPorts as Array<{id:string}>|undefined)??[])
@@ -179,12 +196,20 @@ function workflowNodeHandles(node: WorkflowNode): Node<WorkflowNodeData>["handle
 }
 
 function workflowOutputHandles(node:WorkflowNode):string[]{
-  if(node.type==="switch")return [...(((node.configuration.cases as Array<{id:string}>|undefined)??[]).map(item=>item.id)),String(node.configuration.fallbackBranchId??"fallback")];
-  if(node.type==="filter"||node.type==="split_out")return ["output","rejected"];
-  if(node.type==="loop_over_items")return ["loop","done"];
-  if(node.type==="remove_duplicates")return ["output","duplicates"];
+  if((node.type==="code"||node.type==="javascript_code")&&node.configuration.executionMode==="source")return["code"];
+  if(node.type==="custom_function")return [...(node.customization?.outputs.map(port=>port.key)??[]),...(node.customization?.branches.map(port=>port.key)??[]),...(node.errorPolicy?.strategy==="route"?["error"]:[])];
+  const error=node.errorPolicy?.strategy==="route"?["error"]:[];
+  if(node.type==="switch")return [...(((node.configuration.cases as Array<{id:string}>|undefined)??[]).map(item=>item.id)),String(node.configuration.fallbackBranchId??"fallback"),...error];
+  if(node.type==="filter"||node.type==="split_out")return ["output","rejected",...error];
+  if(node.type==="loop_over_items")return ["loop","done",...error];
+  if(node.type==="remove_duplicates")return ["output","duplicates",...error];
+  if(node.type==="validate_schema")return ["valid","invalid",...error];
+  if(error.length)return["output","error"];
   return [];
 }
+
+const CUSTOMIZABLE_SOURCES=new Set<NodeType>(["condition","filter","switch","split_out","aggregate","merge","remove_duplicates","set_data","map_fields","validate_schema","text_template","hash_data"]);
+async function contractHash(value:unknown){const bytes=new TextEncoder().encode(JSON.stringify(value));const digest=await crypto.subtle.digest("SHA-256",bytes);return [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,"0")).join("")}
 
 interface RecoveryContext {
   workflowId: string;
@@ -201,11 +226,17 @@ function readRecoveryContext(workflowId: string): RecoveryContext | undefined {
   }
 }
 
+const collaborationWorkspaceStorageKey = "sandbox.cloud.workspace";
+const readCollaborationWorkspace = () => {
+  try { return localStorage.getItem(collaborationWorkspaceStorageKey) ?? ""; }
+  catch { return ""; }
+};
+
 export function WorkflowEditor() {
   const toast = useToast();
   const { activeWorkflow, setView, saveWorkflow } = useAppStore();
   const [workflow, setWorkflow] = useState(() =>
-    structuredClone(activeWorkflow!),
+    repairWorkflowTriggerReference(structuredClone(activeWorkflow!)),
   );
   const [initialViewport] = useState(() => {
     try {
@@ -269,10 +300,26 @@ export function WorkflowEditor() {
   const aiOpenRequested = useAiWorkflowStore((state) => state.sessions[workflow.id]?.openRequested ?? false);
   const consumeAiOpenRequest = useAiWorkflowStore((state) => state.consumeOpenRequest);
   const [announcement, setAnnouncement] = useState("");
+  const [customDraft,setCustomDraft]=useState<{node:WorkflowNode;source?:WorkflowNode;initial:string;isNew:boolean}>();
+  const [customLeaveOpen,setCustomLeaveOpen]=useState(false);
   const [browserProfiles, setBrowserProfiles] = useState<BrowserProfile[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>(
     [],
   );
+  const [initialCollaboration]=useState(()=>collaborationSessionFor(activeWorkflow!.id));
+  const [collaborationOpen,setCollaborationOpen]=useState(false);
+  const [collaborationHandle,setCollaborationHandle]=useState<CollaborationSessionHandle|undefined>(initialCollaboration?.handle);
+  const [collaborators,setCollaborators]=useState<DecryptedCollaborationPresence[]>([]);
+  const [collaborationBusy,setCollaborationBusy]=useState(false);
+  const [collaborationError,setCollaborationError]=useState<string>();
+  const [collaborationDeviceId]=useState(collaborationDeviceIdentity);
+  const [collaborationDeviceColorValue]=useState(()=>collaborationDeviceColor(collaborationDeviceId));
+  const collaborationHandleRef=useRef<CollaborationSessionHandle|undefined>(undefined);
+  const collaborationAppliedSequence=useRef(initialCollaboration?.appliedSequence??0);
+  const collaborationClientSequence=useRef(initialCollaboration?.clientSequence??0);
+  const collaborationPublishQueue=useRef<Promise<void>>(Promise.resolve());
+  const collaborationPendingOperations=useRef<WorkflowCollaborationOperation[]>([]);
+  const workflowRef=useRef(workflow);
   const past = useRef<Workflow[]>([]);
   const future = useRef<Workflow[]>([]);
   const validationRequest = useRef(0);
@@ -285,6 +332,8 @@ export function WorkflowEditor() {
     () => connectedNodeRoles(workflow.edges, selectedNodeId),
     [selectedNodeId, workflow.edges],
   );
+  workflowRef.current=workflow;
+  collaborationHandleRef.current=collaborationHandle;
   const openPermissionReview = (request?: PermissionReviewRequest) => {
     setPermissionRequest(request);
     setPermissionOpen(true);
@@ -333,15 +382,37 @@ export function WorkflowEditor() {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
   };
+  const publishCollaborativeChange=useCallback((previous:Workflow,next:Workflow)=>{
+    const handle=collaborationHandleRef.current;
+    if(!handle)return;
+    const operation=diffCollaborativeWorkflow(previous,next,collaborationDeviceId,collaborationAppliedSequence.current);
+    if(!operation)return;
+    collaborationPendingOperations.current.push(operation);
+    collaborationPublishQueue.current=collaborationPublishQueue.current.then(async()=>{
+      const sequenced={...operation,baseSequence:collaborationAppliedSequence.current};
+      collaborationPendingOperations.current=collaborationPendingOperations.current.map(pending=>pending.operationId===sequenced.operationId?sequenced:pending);
+      collaborationClientSequence.current+=1;
+      await api.appendWorkflowCollaborationOperation(handle,sequenced,collaborationClientSequence.current);
+      rememberCollaborationSession({handle,appliedSequence:collaborationAppliedSequence.current,clientSequence:collaborationClientSequence.current});
+      setCollaborationError(undefined);
+    }).catch(error=>{
+      collaborationPendingOperations.current=collaborationPendingOperations.current.filter(pending=>pending.operationId!==operation.operationId);
+      const message=`Live edit was not published: ${String(error)}`;
+      setCollaborationError(message);
+      toast.push(message,"error");
+    });
+  },[collaborationDeviceId,toast]);
   const commit = useCallback(
     (next: Workflow) => {
       actionSerial.current += 1;
       past.current.push(structuredClone(workflow));
       if (past.current.length > 50) past.current.shift();
       future.current = [];
-      setWorkflow(next);
+      const secured=invalidatePermissionApprovals(workflow,repairWorkflowTriggerReference(next));
+      publishCollaborativeChange(workflow,secured);
+      setWorkflow(secured);
     },
-    [workflow],
+    [workflow,publishCollaborativeChange],
   );
   const patchWorkflow = useCallback(
     (patch: Partial<Workflow>) => commit({ ...workflow, ...patch }),
@@ -423,6 +494,17 @@ export function WorkflowEditor() {
     };
   }, [dirty]);
   useEffect(() => {
+    (window as Window & { __sandboxWorkflow?: Workflow }).__sandboxWorkflow = workflow;
+    return () => {
+      delete (window as Window & { __sandboxWorkflow?: Workflow }).__sandboxWorkflow;
+    };
+  }, [workflow]);
+  useEffect(() => {
+    const review = () => openPermissionReview();
+    window.addEventListener("sandbox:review-permissions", review);
+    return () => window.removeEventListener("sandbox:review-permissions", review);
+  }, []);
+  useEffect(() => {
     const openPicker = () =>
       setPicker({ open: true, position: { x: 360, y: 220 } });
     window.addEventListener("sandbox:open-node-picker", openPicker);
@@ -436,7 +518,7 @@ export function WorkflowEditor() {
       );
   }, [accessibleEditorOpen]);
   useEffect(() => {
-    void api.listBrowserProfiles().then(setBrowserProfiles);
+    void api.listBrowserProfiles().then(setBrowserProfiles).catch(() => setBrowserProfiles([]));
   }, []);
   useEffect(() => {
     const owner = workflow.owner ?? {
@@ -445,8 +527,142 @@ export function WorkflowEditor() {
     };
     void api
       .listInstalledPlugins(owner.ownerType, owner.ownerId)
-      .then(setInstalledPlugins);
+      .then(setInstalledPlugins)
+      .catch(() => setInstalledPlugins([]));
   }, [workflow.owner?.ownerType, workflow.owner?.ownerId]);
+  useEffect(()=>{
+    if(!collaborationHandle)return;
+    let cancelled=false;
+    let timer=0;
+    const poll=async()=>{
+      try{
+        const page=await api.pollWorkflowCollaborationOperations(collaborationHandle,collaborationAppliedSequence.current);
+        if(cancelled)return;
+        let next=workflowRef.current;
+        let sequence=collaborationAppliedSequence.current;
+        let receivedRemoteOperation=false;
+        for(const item of [...page.items].sort((left,right)=>left.sequence-right.sequence)){
+          if(item.sequence<=sequence)continue;
+          if(item.sequence!==sequence+1)throw new Error(`Collaboration sequence gap: expected ${sequence+1}, received ${item.sequence}.`);
+          const operation=parseCollaborationOperation(item.payload,{workflowId:collaborationHandle.session.workflowId,operationId:item.operationId,baseSequence:item.baseSequence});
+          if(operation.actorId!==collaborationDeviceId)receivedRemoteOperation=true;
+          const ownSnapshot=operation.actorId===collaborationDeviceId&&operation.changes.length===1&&operation.changes[0].kind==="workflow_snapshot";
+          if(!ownSnapshot){const applied=applyCollaborationOperation(next,operation);next=invalidatePermissionApprovals(next,applied)}
+          collaborationPendingOperations.current=collaborationPendingOperations.current.filter(pending=>pending.operationId!==operation.operationId);
+          sequence=item.sequence;
+        }
+        for(const pending of collaborationPendingOperations.current)next=applyCollaborationOperation(next,pending);
+        collaborationAppliedSequence.current=sequence;
+        rememberCollaborationSession({handle:collaborationHandle,appliedSequence:sequence,clientSequence:collaborationClientSequence.current});
+        if(next!==workflowRef.current){
+          if(receivedRemoteOperation){past.current=[];future.current=[]}
+          const repaired = repairWorkflowTriggerReference(next);
+          workflowRef.current=repaired;
+          setWorkflow(repaired);
+          if(receivedRemoteOperation)setAnnouncement("Encrypted changes from another editor were applied. Local undo history was reset.");
+        }
+        if(page.latestSequence<sequence)throw new Error("The collaboration service returned a stale sequence.");
+        setCollaborationError(undefined);
+        timer=window.setTimeout(poll,page.items.length>=50?40:750);
+      }catch(error){
+        if(cancelled)return;
+        setCollaborationError(`Live sync paused: ${String(error)}`);
+        timer=window.setTimeout(poll,1800);
+      }
+    };
+    void poll();
+    return()=>{cancelled=true;window.clearTimeout(timer)};
+  },[collaborationHandle,collaborationDeviceId]);
+  useEffect(()=>{
+    if(!collaborationHandle)return;
+    let cancelled=false;
+    let timer=0;
+    const heartbeat=async()=>{
+      try{
+        await api.updateWorkflowCollaborationPresence(collaborationHandle,collaborationDeviceId,collaborationDeviceColorValue,{selectedNodeIds:selectedNodeId?[selectedNodeId]:[],viewport:instance?.getViewport()});
+        const current=await api.listWorkflowCollaborationPresence(collaborationHandle);
+        if(cancelled)return;
+        setCollaborators(current.map(person=>({
+          ...person,
+          payload:{
+            selectedNodeIds:Array.isArray(person.payload?.selectedNodeIds)?person.payload.selectedNodeIds.filter(value=>typeof value==="string").slice(0,100):[],
+            cursor:person.payload?.cursor&&Number.isFinite(person.payload.cursor.x)&&Number.isFinite(person.payload.cursor.y)?person.payload.cursor:undefined,
+            viewport:person.payload?.viewport&&Number.isFinite(person.payload.viewport.x)&&Number.isFinite(person.payload.viewport.y)&&Number.isFinite(person.payload.viewport.zoom)?person.payload.viewport:undefined,
+          },
+        })));
+        timer=window.setTimeout(heartbeat,4_000);
+      }catch(error){
+        if(cancelled)return;
+        setCollaborationError(current=>current??`Presence update failed: ${String(error)}`);
+        timer=window.setTimeout(heartbeat,6_000);
+      }
+    };
+    void heartbeat();
+    return()=>{cancelled=true;window.clearTimeout(timer)};
+  },[collaborationHandle,collaborationDeviceColorValue,collaborationDeviceId,instance,selectedNodeId]);
+  const startCollaboration=async(workspaceId:string)=>{
+    setCollaborationBusy(true);setCollaborationError(undefined);
+    let started:CollaborationSessionHandle|undefined;
+    try{
+      if(dirty)throw new Error("Save the workflow before starting a shared canvas.");
+      const safeWorkflow=await api.prepareWorkflowCollaborationSnapshot(workflow.id);
+      const handle=await api.startWorkflowCollaboration(workspaceId,workflow.id,collaborationDeviceId,collaborationDeviceColorValue);
+      started=handle;
+      const snapshot=snapshotCollaborativeWorkflow(safeWorkflow,collaborationDeviceId,0);
+      collaborationClientSequence.current=1;
+      await api.appendWorkflowCollaborationOperation(handle,snapshot,1);
+      collaborationAppliedSequence.current=0;
+      try{localStorage.setItem(collaborationWorkspaceStorageKey,workspaceId)}catch{/* collaboration remains active for this session */}
+      rememberCollaborationSession({handle,appliedSequence:0,clientSequence:1});
+      setCollaborationHandle(handle);setCollaborators([]);setCollaborationOpen(false);
+      toast.push("Secure live canvas started. Share the invite code when you are ready.","success");
+    }catch(error){if(started)void api.leaveWorkflowCollaboration(started,collaborationDeviceId).catch(()=>undefined);setCollaborationError(String(error))}
+    finally{setCollaborationBusy(false)}
+  };
+  const joinCollaboration=async(inviteCode:string)=>{
+    setCollaborationBusy(true);setCollaborationError(undefined);
+    try{
+      if(dirty)throw new Error("Save or discard local changes before joining a shared canvas.");
+      const handle=await api.joinWorkflowCollaboration(inviteCode,collaborationDeviceId,collaborationDeviceColorValue);
+      if(handle.session.workflowId!==workflow.id){
+        await api.leaveWorkflowCollaboration(handle,collaborationDeviceId);
+        throw new Error("This invite belongs to another workflow. Open its matching local workflow before joining.");
+      }
+      collaborationAppliedSequence.current=0;collaborationClientSequence.current=0;
+      rememberCollaborationSession({handle,appliedSequence:0,clientSequence:0});
+      setCollaborationHandle(handle);setCollaborators([]);setCollaborationOpen(false);
+      toast.push("Joined the encrypted live canvas.","success");
+    }catch(error){setCollaborationError(String(error))}
+    finally{setCollaborationBusy(false)}
+  };
+  const leaveCollaboration=async()=>{
+    const handle=collaborationHandleRef.current;if(!handle)return;
+    setCollaborationBusy(true);
+    try{
+      await collaborationPublishQueue.current;
+      await api.leaveWorkflowCollaboration(handle,collaborationDeviceId);
+      setCollaborationHandle(undefined);setCollaborators([]);setCollaborationError(undefined);setCollaborationOpen(false);
+      forgetCollaborationSession(handle.session.workflowId);
+      collaborationAppliedSequence.current=0;collaborationClientSequence.current=0;
+      collaborationPendingOperations.current=[];
+      toast.push("You left the live canvas.","info");
+    }catch(error){setCollaborationError(String(error))}
+    finally{setCollaborationBusy(false)}
+  };
+  useEffect(()=>{
+    const listener=(event:Event)=>{
+      const detail=(event as CustomEvent<{action?:string;inviteCode?:string}>).detail;
+      if(detail?.action==="join"&&detail.inviteCode){void joinCollaboration(detail.inviteCode);return}
+      setCollaborationOpen(true);
+    };
+    window.addEventListener("sandbox:workflow-collaboration",listener);
+    return()=>window.removeEventListener("sandbox:workflow-collaboration",listener);
+  });
+  useEffect(()=>{
+    const target=window as Window&{__sandboxCollaboration?:{live:boolean;participants:Array<{displayName:string}>}};
+    target.__sandboxCollaboration={live:Boolean(collaborationHandle),participants:collaborators.map(person=>({displayName:person.displayName}))};
+    return()=>{delete target.__sandboxCollaboration};
+  },[collaborationHandle,collaborators]);
   useEffect(() => {
     if (!api.isDesktop) return;
     let stop: undefined | (() => void);
@@ -546,9 +762,9 @@ export function WorkflowEditor() {
   useEffect(() => {
     const request = ++validationRequest.current;
     const timer = window.setTimeout(() => {
-      void api
-        .validateWorkflow(workflow)
-        .then((result) => {
+      void Promise.all([api.validateWorkflow(workflow),api.evaluateNodeGates(workflow,"local")])
+        .then(([validation,gates]) => {
+          const result=[...validation,...Object.entries(gates).filter(([,gate])=>gate.state!=="available"&&gate.code!=="node_disabled").map(([nodeId,gate])=>({code:gate.code,message:gate.message,severity:(gate.state==="blocked"?"error":"warning") as ValidationIssue["severity"],nodeId,suggestion:gate.remediation}))];
           if (request === validationRequest.current)
             setIssues((current) => [
               ...current.filter((issue) => issue.code === "save_failed"),
@@ -590,7 +806,8 @@ export function WorkflowEditor() {
     }
   }, [doSave, test, workflow.id]);
   const clearRecoveryContext = useCallback(() => {
-    localStorage.removeItem("sandbox.editor.recovery-context.v1");
+    try { localStorage.removeItem("sandbox.editor.recovery-context.v1"); }
+    catch { /* recovery cleanup must not block the editor */ }
     setRecoveryContext(undefined);
   }, []);
   const retryRecoveryStep = useCallback(async () => {
@@ -676,6 +893,57 @@ export function WorkflowEditor() {
     },
     [workflow, commit, confirmNodeDeletion, toast],
   );
+  const unlinkNode = useCallback((id: string) => {
+    const linked = workflow.edges.filter((edge) => edge.sourceNodeId === id || edge.targetNodeId === id);
+    if (!linked.length) {
+      toast.push("This node has no connections to unlink.", "info");
+      return;
+    }
+    const action = actionSerial.current + 1;
+    const next = linked.reduce((current, edge) => disconnectWorkflowEdge(current, edge.id), workflow);
+    commit(next);
+    toast.push(`Unlinked ${linked.length} connection${linked.length === 1 ? "" : "s"}.`, "info", {
+      label: "Undo",
+      onAction: () => {
+        if (actionSerial.current === action) undoRef.current();
+      },
+    });
+  }, [commit, toast, workflow]);
+  const assembleWebBuilder = useCallback((sourceId: string) => {
+    const selected = workflow.nodes.find((node) => node.id === sourceId);
+    if (!selected) return;
+    const sourceBlocks = workflow.nodes.filter((node) =>
+      (node.type === "code" || node.type === "javascript_code") &&
+      node.configuration.executionMode === "source" &&
+      ["html", "javascript", "css"].includes(String(node.configuration.language)),
+    );
+    const nearest = (language: string) => sourceBlocks
+      .filter((node) => node.configuration.language === language)
+      .sort((left, right) => {
+        if (left.id === sourceId) return -1;
+        if (right.id === sourceId) return 1;
+        const distance = (node: WorkflowNode) => Math.hypot(node.position.x - selected.position.x, node.position.y - selected.position.y);
+        return distance(left) - distance(right);
+      })[0];
+    const builder = createNode("web_builder", { x: selected.position.x + 320, y: selected.position.y });
+    builder.name = "Web Builder";
+    let next: Workflow = { ...workflow, nodes: [...workflow.nodes, builder] };
+    const missing: string[] = [];
+    for (const port of WEB_BUILDER_INPUT_PORTS) {
+      const source = nearest(port.language);
+      if (!source) {
+        missing.push(port.label);
+        continue;
+      }
+      next = connectWorkflowNodes(next, { source: source.id, target: builder.id, sourceHandle: "code", targetHandle: port.id }) ?? next;
+    }
+    commit(next);
+    setSelectedNodeId(builder.id);
+    toast.push(missing.length
+      ? `Web Builder created. Add editable ${missing.join(", ")} source blocks to complete it.`
+      : "Web Builder assembled directly from the nearest HTML, JavaScript, and CSS source blocks.",
+    missing.length ? "info" : "success");
+  }, [commit, toast, workflow]);
   const duplicate = useCallback(
     (id: string) => {
       const original = workflow.nodes.find((n) => n.id === id);
@@ -691,6 +959,17 @@ export function WorkflowEditor() {
     },
     [workflow, commit],
   );
+  const openCustomEditor = useCallback(async (id:string) => {
+    const source=workflow.nodes.find(node=>node.id===id);if(!source)return;
+    if(source.type==="custom_function"&&source.customization){setCustomDraft({node:structuredClone(source),initial:JSON.stringify(source),isNew:false});return}
+    if(!CUSTOMIZABLE_SOURCES.has(source.type)){toast.push("Only pure built-in transformation nodes can create a custom version in this release.","info");return}
+    const definition=definitionFor(source.type);const branches=workflowOutputHandles(source).map(key=>({key,label:key.replaceAll("_"," "),type:"any" as const,required:false}));
+    const sourceContractHash=await contractHash({type:source.type,version:source.version,inputs:definition.inputs,outputs:definition.outputs,branches,configuration:source.configuration});
+    const outputs=structuredClone(definition.outputs);const outputObject=Object.fromEntries(outputs.map(port=>[port.key,null]));
+    const custom:WorkflowNode={id:`custom_function_${crypto.randomUUID().slice(0,8)}`,type:"custom_function",version:1,name:`${source.name} custom`,position:{x:source.position.x+48,y:source.position.y+48},configuration:{},disabled:false,inputBindings:{},customization:{sourceType:source.type,sourceVersion:source.version,sourceName:source.name,sourceContractHash,language:"javascript",sourceCode:`// Return exactly { outputs, branches? }.\nreturn { outputs: ${JSON.stringify(outputObject,null,2)}, branches: {} };\n`,description:definition.description,inputs:structuredClone(definition.inputs),outputs,branches,tests:[],runtimeRequirement:">=20"},errorPolicy:{strategy:"fail",maxRetries:0,retryDelayMs:0,backoff:"fixed",fallbackOutputs:{}}};
+    setCustomDraft({node:custom,source:structuredClone(source),initial:JSON.stringify(custom),isNew:true});
+  },[toast,workflow.nodes]);
+  useEffect(()=>{const handler=(event:Event)=>{const {action,nodeId}=(event as CustomEvent<{action:string;nodeId:string}>).detail??{};if(!nodeId)return;if(action==="select")setSelectedNodeId(nodeId);else if(action==="customize")void openCustomEditor(nodeId);else if(action==="delete")removeNode(nodeId);else if(action==="unlink")unlinkNode(nodeId);else if(action==="web-builder")assembleWebBuilder(nodeId);else if(action==="enable"||action==="disable")commit({...workflow,nodes:workflow.nodes.map(node=>node.id===nodeId?{...node,disabled:action==="disable"}:node)})};window.addEventListener("sandbox:node-command",handler);return()=>window.removeEventListener("sandbox:node-command",handler)},[assembleWebBuilder,commit,openCustomEditor,removeNode,unlinkNode,workflow]);
   const undo = useCallback(() => {
     const previous = past.current.pop();
     if (previous) {
@@ -741,10 +1020,8 @@ export function WorkflowEditor() {
       } else if (e.key === "Escape") {
         setSelectedNodeId(undefined);
         setPicker((p) => ({ ...p, open: false }));
-      } else if (mod && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPicker({ open: true, position: { x: 360, y: 220 } });
       } else if (e.key.toLowerCase() === "a" && !mod) {
+        e.preventDefault();
         setPicker({ open: true, position: { x: 360, y: 220 } });
       }
     };
@@ -941,6 +1218,7 @@ export function WorkflowEditor() {
             ? "This node failed during the latest run."
             : undefined);
         const connectionRole = connectionRoles.get(node.id);
+        const remoteEditors=collaborators.filter(person=>person.deviceId!==collaborationDeviceId&&person.payload.selectedNodeIds.includes(node.id));
 
         return {
           id: node.id,
@@ -950,6 +1228,8 @@ export function WorkflowEditor() {
           initialHeight: workflowNodeDimensions.height,
           handles: workflowNodeHandles(node),
           selected: node.id === selectedNodeId,
+          className:remoteEditors.length?"remote-selected":undefined,
+          style:remoteEditors.length?{"--collaborator-color":remoteEditors[0].color} as CSSProperties:undefined,
           ariaLabel: `${node.name}, ${node.type.replaceAll("_", " ")}${connectionRole ? `, ${connectionRole} of selected node` : ""}, position x ${Math.round(node.position.x)}, y ${Math.round(node.position.y)}`,
           data: {
             node,
@@ -986,6 +1266,8 @@ export function WorkflowEditor() {
       showAskAiOnNodeIssues,
       openAiForNode,
       connectionRoles,
+      collaborators,
+      collaborationDeviceId,
     ],
   );
   const [displayNodes, setDisplayNodes, onDisplayNodesChange] =
@@ -1049,6 +1331,10 @@ export function WorkflowEditor() {
     const next = connectWorkflowNodes(workflow, connection);
     if (next) commit(next);
   };
+  if(customDraft)return <>
+    <Suspense fallback={<main className="fx-editor" aria-busy="true"><div className="drawer-empty">Loading custom function workspace…</div></main>}><CustomNodeEditor workflow={workflow} node={customDraft.node} source={customDraft.source} onChange={node=>setCustomDraft(current=>current?{...current,node}:current)} onSave={()=>{const next=customDraft.isNew?{...workflow,nodes:[...workflow.nodes,customDraft.node]}:{...workflow,nodes:workflow.nodes.map(node=>node.id===customDraft.node.id?customDraft.node:node)};commit(next);setSelectedNodeId(customDraft.node.id);setCustomDraft(undefined);toast.push("Custom ƒx draft saved to the workflow. Verify its fixtures before running.","success")}} onBack={()=>{if(JSON.stringify(customDraft.node)!==customDraft.initial)setCustomLeaveOpen(true);else setCustomDraft(undefined)}} onAi={()=>{setAiChatContext({key:`custom:${customDraft.node.id}`,label:`Custom function: ${customDraft.node.name}`,prompt:`Help improve the ${customDraft.node.customization?.language} custom function and its declared sndbox input, output, and branch contract. It must return { outputs, branches? } and cannot use ambient host capabilities.`});setAiChatOpen(true)}}/></Suspense>
+    <ConfirmDialog open={customLeaveOpen} onOpenChange={setCustomLeaveOpen} title="Discard custom function changes?" description="Code, contract, and fixture edits in this full-page draft have not been saved to the workflow." confirmLabel="Discard changes" dangerous onConfirm={()=>{setCustomLeaveOpen(false);setCustomDraft(undefined)}}/>
+  </>;
   return (
     <main
       className="editor"
@@ -1086,6 +1372,12 @@ export function WorkflowEditor() {
           {workflow.enabled ? "Enabled" : "Disabled"}
         </label>
         <div className="topbar-spacer" />
+        <Tooltip content={collaborationHandle?"Manage live canvas":"Share this workflow canvas"}>
+          <button className={`button collaboration-toolbar ${collaborationHandle?"live":""}`} onClick={()=>setCollaborationOpen(true)} aria-label={collaborationHandle?`Live canvas with ${collaborators.length||1} editors`:"Share workflow canvas"}>
+            <Share2 size={14}/><span>{collaborationHandle?"Live":"Share"}</span>
+            {collaborationHandle&&<span className="collaboration-toolbar-avatars" aria-hidden="true">{collaborators.slice(0,3).map(person=><i className="collaboration-avatar" style={{background:person.color}} key={`${person.accountId}:${person.deviceId}`}>{(person.displayName[0]??"?").toUpperCase()}</i>)}</span>}
+          </button>
+        </Tooltip>
         <Tooltip content={aiChatOpen ? "Close AI builder" : "Open AI builder"}>
           <button
             className={`ai-chat-trigger ${aiChatOpen ? "active" : ""}`}
@@ -1268,12 +1560,7 @@ export function WorkflowEditor() {
             edges={flowEdges}
             nodeTypes={nodeTypes}
             onInit={setInstance}
-            onMoveEnd={(_, viewport) =>
-              localStorage.setItem(
-                `sandbox.workflow-viewport.v1.${workflow.id}`,
-                JSON.stringify(viewport),
-              )
-            }
+            onMoveEnd={(_, viewport) => { try { localStorage.setItem(`sandbox.workflow-viewport.v1.${workflow.id}`, JSON.stringify(viewport)); } catch { /* viewport persistence is optional */ } }}
             onNodesChange={onNodesChange}
             onNodeClick={(_, node) => setSelectedNodeId(node.id)}
             onPaneClick={() => setSelectedNodeId(undefined)}
@@ -1385,6 +1672,9 @@ export function WorkflowEditor() {
                 commit(next);
               }}
               onDelete={() => removeNode(selectedNode.id)}
+              onUnlink={() => unlinkNode(selectedNode.id)}
+              onSendToWebBuilder={(selectedNode.type === "code" || selectedNode.type === "javascript_code") && selectedNode.configuration.executionMode === "source" ? () => assembleWebBuilder(selectedNode.id) : undefined}
+              onCustomize={selectedNode.type==="custom_function"||CUSTOMIZABLE_SOURCES.has(selectedNode.type)?()=>void openCustomEditor(selectedNode.id):undefined}
             /></Suspense>
           </>
         )}
@@ -1514,6 +1804,13 @@ export function WorkflowEditor() {
             action: () => openPermissionReview(),
           },
           {
+            id: "editor-collaboration",
+            group: "Editor",
+            name: collaborationHandle ? "Manage live canvas" : "Share workflow canvas",
+            description: collaborationHandle ? `${collaborators.length || 1} editors are connected securely.` : "Start or join an end-to-end encrypted editing session.",
+            action: () => setCollaborationOpen(true),
+          },
+          {
             id: "editor-back",
             group: "Navigation",
             name: "Back to workflows",
@@ -1549,6 +1846,18 @@ export function WorkflowEditor() {
           }}
         />
       )}
+      <CollaborationDialog
+        open={collaborationOpen}
+        onOpenChange={setCollaborationOpen}
+        handle={collaborationHandle}
+        participants={collaborators}
+        busy={collaborationBusy}
+        error={collaborationError}
+        defaultWorkspaceId={readCollaborationWorkspace()}
+        onStart={workspaceId=>void startCollaboration(workspaceId)}
+        onJoin={inviteCode=>void joinCollaboration(inviteCode)}
+        onLeave={()=>void leaveCollaboration()}
+      />
       <Dialog
         open={revisionOpen}
         onOpenChange={setRevisionOpen}
@@ -1574,7 +1883,7 @@ export function WorkflowEditor() {
         onOpenChange={(open) => { if (!open) setDraftPrompt(undefined); }}
         title="Restore recovery draft?"
         description={draftPrompt && draftUsesEarlierBase(draftPrompt, activeWorkflow!) ? "This draft was made against an earlier saved version. Restoring it replaces only the in-memory editor state; it is not saved until you explicitly Save." : "Restoring replaces only the in-memory editor state; it is not saved until you explicitly Save."}
-        footer={<><button className="button" onClick={() => { if (draftPrompt) clearWorkflowDraft(draftPrompt.workflowId); setDraftPrompt(undefined); }}>Discard draft</button><button className="button primary" onClick={() => { if (!draftPrompt) return; setWorkflow(structuredClone(draftPrompt.workflow)); setDraftPrompt(undefined); }}>Restore draft</button></>}
+        footer={<><button className="button" onClick={() => { if (draftPrompt) clearWorkflowDraft(draftPrompt.workflowId); setDraftPrompt(undefined); }}>Discard draft</button><button className="button primary" onClick={() => { if (!draftPrompt) return; setWorkflow(repairWorkflowTriggerReference(structuredClone(draftPrompt.workflow))); setDraftPrompt(undefined); }}>Restore draft</button></>}
       >
         <p>This recovery draft is stored only on this device. Choosing Restore keeps it until a successful explicit Save.</p>
       </Dialog>
@@ -1659,7 +1968,15 @@ function PermissionReview({
   onApply: (permissions: PermissionSummary) => void;
 }) {
   const [permissions, setPermissions] = useState(workflow.settings.permissions);
+  const [contracts, setContracts] = useState<NodeContract[]>([]);
   const reviewBody = useRef<HTMLElement>(null);
+  useEffect(() => {
+    void api.listNodeContracts().then(setContracts).catch(() => setContracts([]));
+  }, []);
+  const contractByType = useMemo(
+    () => new Map(contracts.map((contract) => [contract.nodeType, contract])),
+    [contracts],
+  );
   const domains = workflow.nodes
     .filter((node) => node.type === "http_request")
     .map((node) => {
@@ -1694,9 +2011,30 @@ function PermissionReview({
     (node) => node.type === "gmail_send_email",
   );
   const externalWriteNodes = workflow.nodes.filter((node) =>
+    ["gmail_create_draft", "gmail_add_label"].includes(node.type) ||
     definitionFor(node.type).externalEffect === "external_write" ||
     definitionFor(node.type).externalEffect === "destructive_or_high_impact"
   );
+  const localPathNodes = workflow.nodes.filter((node) =>
+    ["file_watch_trigger", "move_file", "read_file", "write_file", "copy_path", "delete_path", "list_folder", "download_file", "upload_file"].includes(node.type),
+  );
+  const backgroundRequired = workflow.enabled && workflow.nodes.some((node) =>
+    node.id === workflow.triggerNodeId && ["schedule_trigger", "file_watch_trigger", "gmail_new_email_trigger"].includes(node.type),
+  );
+  const capabilityChecks = [
+    { label: "Network", requested: domains.length > 0, approved: domains.every((domain) => permissions.approvedNetworkDomains.includes(domain)) },
+    { label: "Local files", requested: localPathNodes.length > 0, approved: permissions.approvedFolders.length > 0 },
+    { label: "Browser", requested: browserProfiles.length > 0, approved: permissions.browserAutomationPermitted && browserProfiles.every((id) => permissions.approvedBrowserProfileIds.includes(id)) },
+    { label: "Communication", requested: communicationNodes.length > 0, approved: permissions.externalCommunicationPermitted && (!sendNodes.length || Boolean(permissions.communicationApprovalRevision)) },
+    { label: "External writes", requested: externalWriteNodes.length > 0, approved: Boolean(permissions.externalDataWritePermitted) },
+    { label: "Commands", requested: commandNodes.length > 0, approved: permissions.commandExecutionPermitted && Boolean(permissions.approvalRevision) },
+    { label: "Background", requested: backgroundRequired, approved: permissions.backgroundExecutionPermitted },
+  ].filter((item) => item.requested);
+  const approvedCapabilityCount = capabilityChecks.filter((item) => item.approved).length;
+  const contractImpactNodes = workflow.nodes
+    .map((node) => ({ node, contract: contractByType.get(node.type) }))
+    .filter((item) => item.contract && item.contract.effectLevel !== "pure");
+  const destructiveCount = contractImpactNodes.filter((item) => item.contract?.effectLevel === "destructive").length;
   const collectionRiskNotes=workflow.nodes.flatMap(node=>{
     if(node.type==="loop_over_items")return [`${node.name}: up to ${Number(node.configuration.maxIterations??10000)} batches, ${Number(node.configuration.concurrency??1)} active at once; downstream actions may run once per item.`];
     if(node.type==="switch"&&node.configuration.mode==="all_matches")return [`${node.name}: one item may be copied to several branches.`];
@@ -1786,6 +2124,15 @@ function PermissionReview({
               context={{ workflowId: workflow.id, nodeId: request.nodeId }}
             />
           )}
+          <div className="permission-overview" aria-label="Permission review summary">
+            <div><strong>{capabilityChecks.length}</strong><span>capabilities requested</span></div>
+            <div className={approvedCapabilityCount === capabilityChecks.length ? "ready" : "attention"}><strong>{approvedCapabilityCount}/{capabilityChecks.length}</strong><span>currently approved</span></div>
+            <div className={destructiveCount ? "danger" : "ready"}><strong>{destructiveCount}</strong><span>destructive contracts</span></div>
+          </div>
+          <div className="permission-revision-note">
+            <ShieldCheck size={15} />
+            <span><b>Revision-bound approvals</b> Command, browser, and communication changes automatically revoke their prior approval. Secrets stay in the host credential vault.</span>
+          </div>
           <label>Approved network domains</label>
           {domains.length ? (
             domains.map((domain) => (
@@ -1931,6 +2278,20 @@ function PermissionReview({
             </>
           )}
           {collectionRiskNotes.length>0&&<><label>Collection amplification and state</label>{collectionRiskNotes.map(note=><IssueNotice key={note} issue={{code:"collection_state_review",severity:"warning",message:note,suggestion:"Review runner limits, repeated trusted-path access, ordering, and idempotency before publishing."}} compact context={{workflowId:workflow.id}}/>)}</>}
+          {contractImpactNodes.length > 0 && (
+            <>
+              <label>Authoritative contract impact</label>
+              <div className="permission-contract-list">
+                {contractImpactNodes.map(({ node, contract }) => (
+                  <div key={node.id}>
+                    <span className={`contract-effect contract-effect-${contract!.effectLevel}`}>{contract!.effectLevel}</span>
+                    <b>{node.name}</b>
+                    <small>{contract!.displayName} · retry {contract!.retrySafety.replaceAll("_", " ")}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           {commandNodes.length > 0 && (
             <>
               <label>Command execution</label>

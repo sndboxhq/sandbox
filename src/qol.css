@@ -132,6 +132,41 @@ input[type="checkbox"] {
   background-clip: padding-box;
 }
 .sidebar::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--text-secondary) 72%, transparent); }
+.sidebar-collapsed {
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+}
+.sidebar-collapsed::-webkit-scrollbar {
+  display: none;
+}
+.sidebar-collapsed .brand {
+  width: 100%;
+  padding-inline: 0;
+  justify-content: center;
+  gap: 0;
+}
+.sidebar-collapsed .brand-mark {
+  flex: 0 0 26px;
+}
+.sidebar-collapsed nav,
+.sidebar-collapsed .sidebar-bottom,
+.sidebar-collapsed .sidebar-item-wrap {
+  width: 100%;
+  align-items: stretch;
+}
+.sidebar-collapsed .sidebar-item-wrap > button,
+.sidebar-collapsed .runner-button,
+.sidebar-collapsed .sidebar-bottom > button {
+  width: 100%;
+  padding-inline: 0;
+  justify-content: center;
+  gap: 0;
+}
+.sidebar-collapsed .desktop-update-collapsed {
+  width: 100%;
+  max-width: 32px;
+  margin-inline: auto;
+}
 .react-flow {
   background: var(--surface-canvas);
 }
@@ -477,6 +512,8 @@ input[type="checkbox"] {
 .runner-button.paused > i {
   background: var(--warning);
 }
+.runner-button.unavailable > i { background: var(--error); box-shadow: 0 0 0 3px color-mix(in srgb,var(--error) 12%,transparent); }
+.runner-retry { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
 .runner-button.running > i {
   background: var(--accent);
   animation: pulse 1.3s infinite;
@@ -552,6 +589,10 @@ input[type="checkbox"] {
   color: var(--text-secondary);
   font-size: var(--font-xs);
 }
+.runner-schedule-list li { display: grid; gap: 2px; margin: 5px 0; }
+.runner-schedule-list li span { color: var(--text-secondary); font-size: 10px; }
+.runner-schedule-list li small { color: var(--text-muted); font-size: 8px; }
+.runner-schedule-empty { margin: 0 0 13px; padding: 9px; border: 1px dashed var(--border); border-radius: 6px; color: var(--text-muted); font-size: 9px; }
 .plugins-hub {
   height: 100%;
   overflow: auto;
@@ -1682,6 +1723,11 @@ input[type="checkbox"] {
   border-color: var(--accent);
   color: var(--text);
 }
+@media (max-width: 1240px) {
+  .getting-started-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .getting-started-steps > button:nth-child(-n+3) { border-bottom: 1px solid var(--border); }
+  .getting-started-steps > button:nth-child(3) { border-right: 0; }
+}
 @media (max-width: 1040px) {
   .content {
     padding: 22px;
@@ -1705,6 +1751,8 @@ input[type="checkbox"] {
   }
   .getting-started-steps { grid-template-columns: 1fr 1fr; }
   .getting-started-steps > button { border-bottom: 1px solid var(--border); }
+  .getting-started-steps > button:nth-child(3) { border-right: 1px solid var(--border); }
+  .getting-started-steps > button:nth-child(even) { border-right: 0; }
   .recovery-context-bar span { display: none; }
 }
 
@@ -2427,6 +2475,25 @@ input[type="checkbox"] {
 .issue-summary-info { color: var(--info); background: color-mix(in srgb, var(--info) 7%, transparent); }
 .validation-list { display: grid; gap: 6px; }
 .validation-list .issue-notice { max-width: 720px; }
+
+/* Keep warning and execution details readable in both the editor drawer and
+   the full run-history view without changing the density of the rest of UI. */
+:is(.execution-drawer,.history-detail) .issue-notice { grid-template-columns: 20px minmax(0,1fr); gap: 10px; padding: 11px 12px; }
+:is(.execution-drawer,.history-detail) .issue-level { font-size: 10px; }
+:is(.execution-drawer,.history-detail) .issue-copy > header code { font-size: 10px; }
+:is(.execution-drawer,.history-detail) .issue-copy > b { font-size: 12px; line-height: 1.5; }
+:is(.execution-drawer,.history-detail) .issue-copy > p { font-size: 11px; line-height: 1.55; }
+:is(.execution-drawer,.history-detail) .issue-copy > footer a,
+:is(.execution-drawer,.history-detail) .issue-copy > footer button { font-size: 10px; }
+.execution-drawer .issue-summary > span { font-size: 10px; }
+:is(.execution-drawer,.history-detail) .timeline button b { font-size: 12px; }
+:is(.execution-drawer,.history-detail) .timeline button small { font-size: 11px !important; line-height: 1.45; }
+:is(.execution-drawer,.history-detail) .node-execution-detail h3 { font-size: 14px; }
+:is(.execution-drawer,.history-detail) .node-execution-detail header > div:last-child { font-size: 11px; }
+:is(.execution-drawer,.history-detail) .detail-tabs button { font-size: 12px; }
+:is(.execution-drawer,.history-detail) .code-block pre,
+:is(.execution-drawer,.history-detail) .logs { font-size: 12px !important; line-height: 1.6; }
+:root .history-run-error { font-size: 12px !important; line-height: 1.45; }
 .permission-icon.locked { border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 10%, var(--surface)); color: var(--warning); }
 .permission-icon.granted { border-color: color-mix(in srgb, var(--success) 38%, var(--border)); background: color-mix(in srgb, var(--success) 10%, var(--surface)); color: var(--success); }
 .permission-modal .issue-notice { margin-bottom: 14px; }

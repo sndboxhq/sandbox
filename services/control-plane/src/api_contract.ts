@@ -135,6 +135,12 @@ export function buildOpenApiDocument(routes: ApiRouteDescription[]): Record<stri
     const idempotencySupported=mutation&&path!=="/v1/service-account-assertions/token";
     const parameters: unknown[] = [...path.matchAll(/\{([^}]+)\}/g)].map(match => ({ name: match[1], in: "path", required: true, schema: { type: "string" } }));
     parameters.push({ $ref: "#/components/parameters/CorrelationId" });
+    if (method === "get" && path.endsWith("/collaboration/sessions/{sessionId}/operations")) {
+      parameters.push(
+        { name: "after", in: "query", required: false, schema: { type: "integer", minimum: 0, default: 0 }, description: "Return operations after this server sequence." },
+        { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } },
+      );
+    }
     if (idempotencySupported) parameters.push({ $ref: "#/components/parameters/IdempotencyKey" });
     const operation: Record<string, unknown> = {
       operationId: `${method}_${path.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")}`,
@@ -172,7 +178,7 @@ export function buildOpenApiDocument(routes: ApiRouteDescription[]): Record<stri
   }
   return {
     openapi: "3.1.0",
-    info: { title: "sndbox Control Plane API", version: "0.5.0", description: "Versioned v1 route and transport contract. Resource schemas remain additive during the v0.5 GA candidate." },
+    info: { title: "sndbox Control Plane API", version: "0.8.0", description: "Versioned v1 route and transport contract for sndbox 8. Resource schemas remain additive within v1." },
     servers: [{ url: "https://api.sndbox.app" }],
     paths,
     components: {
@@ -213,6 +219,9 @@ function requestSchema(path: string, method: string): { $ref: string } {
   if (path === "/v1/workspaces/{workspaceId}/privacy-retention" && method === "put") return { $ref: "#/components/schemas/RetentionPolicyInput" };
   if (path === "/v1/account/referrals/claim" && method === "post") return { $ref: "#/components/schemas/ReferralClaimInput" };
   if (path === "/v1/workspaces/{workspaceId}/access-tokens/{tokenId}" && method === "delete") return { $ref: "#/components/schemas/CredentialRevocationInput" };
+  if (path.endsWith("/collaboration/sessions") && method === "post") return { $ref: "#/components/schemas/CollaborationSessionJoinInput" };
+  if (path.endsWith("/collaboration/sessions/{sessionId}/operations") && method === "post") return { $ref: "#/components/schemas/CollaborationOperationInput" };
+  if (path.endsWith("/collaboration/sessions/{sessionId}/presence") && method === "put") return { $ref: "#/components/schemas/CollaborationPresenceInput" };
   return { $ref: `#/components/schemas/${operationSchemaName(path, method, "Input")}` };
 }
 
@@ -242,6 +251,12 @@ function responseSchema(path: string, method: string): { $ref: string } {
   if (path === "/v1/account/referrals/claim" && method === "post") return { $ref: "#/components/schemas/ReferralClaimResponse" };
   if (path === "/v1/account" && method === "delete") return { $ref: "#/components/schemas/AccountDeletionResponse" };
   if ((path === "/v1/personal-access-tokens/{tokenId}" || path === "/v1/workspaces/{workspaceId}/access-tokens/{tokenId}" || path === "/v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}/assertion-keys/{keyId}") && method === "delete") return { $ref: "#/components/schemas/RevocationResponse" };
+  if (path.endsWith("/collaboration/sessions") && method === "post") return { $ref: "#/components/schemas/CollaborationSessionEnvelope" };
+  if (path.endsWith("/collaboration/sessions/{sessionId}/operations") && method === "post") return { $ref: "#/components/schemas/CollaborationOperationEnvelope" };
+  if (path.endsWith("/collaboration/sessions/{sessionId}/operations") && method === "get") return { $ref: "#/components/schemas/CollaborationOperationPage" };
+  if (path.endsWith("/collaboration/sessions/{sessionId}/presence") && method === "put") return { $ref: "#/components/schemas/CollaborationPresenceHeartbeatResponse" };
+  if (path.endsWith("/collaboration/sessions/{sessionId}/presence") && method === "get") return { $ref: "#/components/schemas/CollaborationPresencePage" };
+  if (path.endsWith("/collaboration/sessions/{sessionId}/members/{deviceId}") && method === "delete") return { $ref: "#/components/schemas/CollaborationLeaveResponse" };
   return { $ref: `#/components/schemas/${operationSchemaName(path, method, "Response")}` };
 }
 
@@ -296,6 +311,18 @@ function apiSchemas(routes: ApiRouteDescription[]): Record<string, unknown> {
     AccountExport: {type:"object",required:["exportVersion","exportedAt","classification","account","memberships","workspaceMemberships","sessions","invitations","credentials","personalWorkflows","auditEvents","referrals"],properties:{exportVersion:{const:1},exportedAt:dateTime,classification:{type:"object",additionalProperties:true},account:{type:"object",additionalProperties:true},memberships:{type:"array",items:{$ref:"#/components/schemas/ApiObject"}},workspaceMemberships:{type:"array",items:{$ref:"#/components/schemas/ApiObject"}},sessions:{type:"array",items:{$ref:"#/components/schemas/ApiObject"}},invitations:{type:"array",items:{$ref:"#/components/schemas/ApiObject"}},credentials:{type:"array",items:{$ref:"#/components/schemas/ApiObject"}},personalWorkflows:{type:"array",items:{$ref:"#/components/schemas/ApiObject"}},auditEvents:{type:"array",items:{$ref:"#/components/schemas/ApiObject"}},referrals:{type:"array",items:{$ref:"#/components/schemas/ApiObject"}}},additionalProperties:false},
     AccountDeletionResponse: {type:"object",required:["deleted","requestId","completedAt","summary"],properties:{deleted:{const:true},requestId:uuid,completedAt:dateTime,summary:{type:"object",additionalProperties:{type:"integer",minimum:0}}},additionalProperties:false},
     RevocationResponse: { type: "object", required: ["revoked"], properties: { revoked: { const: true } }, additionalProperties: false },
+    CollaborationSessionJoinInput: { type: "object", required: ["deviceId", "color"], properties: { sessionId: uuid, deviceId: uuid, color: { type: "string", pattern: "^#[a-fA-F0-9]{6}$" } }, additionalProperties: false },
+    CollaborationSession: { type: "object", required: ["sessionId", "workspaceId", "workflowId", "latestSequence", "joinedAt", "expiresAt"], properties: { sessionId: uuid, workspaceId: uuid, workflowId: uuid, latestSequence: { type: "integer", minimum: 0 }, joinedAt: dateTime, expiresAt: dateTime }, additionalProperties: false },
+    CollaborationSessionEnvelope: { type: "object", required: ["session"], properties: { session: { $ref: "#/components/schemas/CollaborationSession" } }, additionalProperties: false },
+    CollaborationOperationInput: { type: "object", required: ["operationId", "baseSequence", "clientSequence", "encryptedPayload", "payloadHash", "createdAt"], properties: { operationId: uuid, baseSequence: { type: "integer", minimum: 0 }, clientSequence: { type: "integer", minimum: 0 }, encryptedPayload: { type: "string", contentEncoding: "base64", minLength: 20, maxLength: 1500000 }, payloadHash: { type: "string", pattern: "^sha256:[a-f0-9]{64}$" }, createdAt: dateTime }, additionalProperties: false },
+    CollaborationOperation: { type: "object", required: ["operationId", "baseSequence", "clientSequence", "encryptedPayload", "payloadHash", "createdAt", "sessionId", "workflowId", "actorAccountId", "sequence", "acceptedAt"], properties: { operationId: uuid, baseSequence: { type: "integer", minimum: 0 }, clientSequence: { type: "integer", minimum: 0 }, encryptedPayload: { type: "string", contentEncoding: "base64", minLength: 20, maxLength: 1500000 }, payloadHash: { type: "string", pattern: "^sha256:[a-f0-9]{64}$" }, createdAt: dateTime, sessionId: uuid, workflowId: uuid, actorAccountId: uuid, sequence: { type: "integer", minimum: 1 }, acceptedAt: dateTime }, additionalProperties: false },
+    CollaborationOperationEnvelope: { type: "object", required: ["operation"], properties: { operation: { $ref: "#/components/schemas/CollaborationOperation" } }, additionalProperties: false },
+    CollaborationOperationPage: { type: "object", required: ["items", "latestSequence"], properties: { items: { type: "array", maxItems: 100, items: { $ref: "#/components/schemas/CollaborationOperation" } }, latestSequence: { type: "integer", minimum: 0 } }, additionalProperties: false },
+    CollaborationPresenceInput: { type: "object", required: ["deviceId", "color", "encryptedPresence"], properties: { deviceId: uuid, color: { type: "string", pattern: "^#[a-fA-F0-9]{6}$" }, encryptedPresence: { type: "string", contentEncoding: "base64", minLength: 20, maxLength: 16384 } }, additionalProperties: false },
+    CollaborationPresence: { type: "object", required: ["deviceId", "color", "encryptedPresence", "accountId", "displayName", "lastSeenAt"], properties: { deviceId: uuid, color: { type: "string", pattern: "^#[a-fA-F0-9]{6}$" }, encryptedPresence: { type: "string", contentEncoding: "base64", minLength: 20, maxLength: 16384 }, accountId: uuid, displayName: { type: "string", minLength: 1, maxLength: 200 }, lastSeenAt: dateTime }, additionalProperties: false },
+    CollaborationPresenceHeartbeatResponse: { type: "object", required: ["updated"], properties: { updated: { const: true } }, additionalProperties: false },
+    CollaborationPresencePage: { type: "object", required: ["items"], properties: { items: { type: "array", items: { $ref: "#/components/schemas/CollaborationPresence" } } }, additionalProperties: false },
+    CollaborationLeaveResponse: { type: "object", required: ["left"], properties: { left: { const: true } }, additionalProperties: false },
     MarketplacePage: { type: "object", required: ["items", "nextCursor"], properties: { items: { type: "array", items: { type: "object", required: ["pluginId", "name", "version", "packageIntegrity"], properties: { pluginId: { type: "string" }, name: { type: "string" }, version: { type: "string" }, packageIntegrity: { type: "string", pattern: "^sha256:[a-f0-9]{64}$" } }, additionalProperties: true } }, nextCursor: { oneOf: [{ type: "string" }, { type: "null" }] } }, additionalProperties: false }
   };
   for (const route of routes.filter(route => route.method !== "HEAD" && (["/health", "/ready"].includes(route.url) || route.url.startsWith("/v1/")))) {

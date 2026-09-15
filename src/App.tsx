@@ -1,8 +1,14 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Sidebar } from "./components/Sidebar";
 import { api } from "./api";
-import type { PendingApproval, PluginPackageInspection } from "./types";
+import type {
+  PendingApproval,
+  PluginPackageInspection,
+  CollaborationSessionHandle,
+  WorkflowImportInspection,
+} from "./types";
 import { useAppStore } from "./store";
 import { useApplyPreferences, usePreferences } from "./preferences";
 import { AsyncErrorBoundary } from "./components/ui/AsyncErrorBoundary";
@@ -12,18 +18,15 @@ import { ConfirmDialog } from "./components/ui/Dialog";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { isTextEntryTarget, useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { readWorkspaceSnapshot, updateWorkspaceSnapshot } from "./workspaceState";
-import { WORKFLOW_TEMPLATES } from "./workflowTemplates";
 import { parseDeepLink, type DeepLinkRequest } from "./deepLinks";
 import "./plugins.css";
+import { collaborationDeviceColor, collaborationDeviceIdentity, rememberCollaborationSession } from "./collaborationSession";
+
+const rememberLocal = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* optional navigation state */ } };
 
 const Dashboard = lazy(() =>
   import("./components/Dashboard").then((module) => ({
     default: module.Dashboard,
-  })),
-);
-const CommandPalette = lazy(() =>
-  import("./components/CommandPalette").then((module) => ({
-    default: module.CommandPalette,
   })),
 );
 const HistoryView = lazy(() =>
@@ -66,11 +69,29 @@ const ActiveAiTabs = lazy(() =>
     default: module.ActiveAiTabs,
   })),
 );
+const CommandShell = lazy(() =>
+  import("./components/CommandShell").then((module) => ({ default: module.CommandShell })),
+);
+const JoinCollaborationDialog = lazy(() =>
+  import("./components/JoinCollaborationDialog").then((module) => ({ default: module.JoinCollaborationDialog })),
+);
+const QuickLauncher = lazy(() =>
+  import("./components/QuickLauncher").then((module) => ({ default: module.QuickLauncher })),
+);
 
 export default function App() {
+  return new URLSearchParams(window.location.search).get("window") ===
+    "quick-launcher" ? (
+    <Suspense fallback={null}><QuickLauncher /></Suspense>
+  ) : (
+    <MainApp />
+  );
+}
+
+function MainApp() {
   const toast = useToast();
   useApplyPreferences();
-  const { view, activeWorkflow, workflows, setView } = useAppStore();
+  const { view, activeWorkflow, setView } = useAppStore();
   const startView = usePreferences((state) => state.startView);
   const restoreLastWorkspace = usePreferences((state) => state.restoreLastWorkspace);
   const initialViewApplied = useRef(false);
@@ -83,6 +104,14 @@ export default function App() {
     useState<PluginPackageInspection>();
   const [deepLinkError, setDeepLinkError] = useState<string>();
   const [deepLinkBusy, setDeepLinkBusy] = useState(false);
+  const [workflowImport, setWorkflowImport] =
+    useState<WorkflowImportInspection>();
+  const [workflowImportBusy, setWorkflowImportBusy] = useState(false);
+  const [workflowImportError, setWorkflowImportError] = useState<string>();
+  const [joinCollaborationOpen,setJoinCollaborationOpen]=useState(false);
+  const [joinCollaborationCode,setJoinCollaborationCode]=useState("");
+  const [joinCollaborationBusy,setJoinCollaborationBusy]=useState(false);
+  const [joinCollaborationError,setJoinCollaborationError]=useState<string>();
   const deepLink = parseDeepLink(deepLinks[0]);
   useEffect(() => {
     const raw = deepLinks[0];
@@ -119,16 +148,18 @@ export default function App() {
     if (event.key === "?" && !event.ctrlKey && !event.metaKey) { event.preventDefault(); setShortcutsOpen(true); return; }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (view === "editor") window.dispatchEvent(new CustomEvent("sandbox:open-node-picker"));
-        else setCommandOpen((value) => !value);
+        setCommandOpen(true);
+        window.dispatchEvent(new CustomEvent("sandbox:open-command-shell"));
+        return;
     }
+    if ((event.ctrlKey || event.metaKey) && event.key === "`") { event.preventDefault(); setCommandOpen(value => !value); }
   }, [view]);
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
     let stop: (() => void) | undefined;
     void listen<string>("navigate", (event) => {
       if (event.payload === "approvals") setView("approvals");
-    }).then((unlisten) => (stop = unlisten));
+    }).then((unlisten) => (stop = unlisten)).catch((error) => console.warn("Navigation listener unavailable", error));
     return () => stop?.();
   }, [setView]);
   useEffect(() => {
@@ -136,12 +167,84 @@ export default function App() {
     let stop: (() => void) | undefined;
     void api
       .listPendingApprovals()
-      .then((items) => setApprovalPrompt(items[0]));
+      .then((items) => setApprovalPrompt(items[0]))
+      .catch((error) => console.warn("Pending approvals could not be checked", error));
     void listen<PendingApproval>("approval-requested", (event) =>
       setApprovalPrompt(event.payload),
-    ).then((unlisten) => (stop = unlisten));
+    ).then((unlisten) => (stop = unlisten)).catch((error) => console.warn("Approval listener unavailable", error));
     return () => stop?.();
   }, []);
+  useEffect(() => {
+    const receiveInspection = (event: Event) => {
+      setWorkflowImport(
+        (event as CustomEvent<WorkflowImportInspection>).detail,
+      );
+      setWorkflowImportError(undefined);
+    };
+    const openLauncher = () => {
+      void api.openQuickLauncher().catch((error) =>
+        toast.push(String(error), "error"),
+      );
+    };
+    window.addEventListener(
+      "sandbox:workflow-import-inspected",
+      receiveInspection,
+    );
+    window.addEventListener("sandbox:open-quick-launcher", openLauncher);
+    return () => {
+      window.removeEventListener(
+        "sandbox:workflow-import-inspected",
+        receiveInspection,
+      );
+      window.removeEventListener("sandbox:open-quick-launcher", openLauncher);
+    };
+  }, [toast]);
+  useEffect(()=>{
+    const open=(event:Event)=>{
+      const code=(event as CustomEvent<{inviteCode?:string}>).detail?.inviteCode??"";
+      setJoinCollaborationCode(code);setJoinCollaborationError(undefined);setJoinCollaborationOpen(true);
+    };
+    window.addEventListener("sandbox:join-collaboration",open);
+    return()=>window.removeEventListener("sandbox:join-collaboration",open);
+  },[]);
+  useEffect(() => {
+    if (!api.isDesktop) return;
+    let cancelled = false;
+    const cleanups: Array<() => void> = [];
+    const inspectPaths = async (paths: string[]) => {
+      if (paths.length !== 1) {
+        if (paths.length > 1)
+          toast.push("Drop or open one workflow file at a time.", "error");
+        return;
+      }
+      try {
+        const inspection = await api.inspectWorkflowPath(paths[0]);
+        if (!cancelled) {
+          setWorkflowImport(inspection);
+          setWorkflowImportError(undefined);
+        }
+      } catch (error) {
+        if (!cancelled) toast.push(String(error), "error");
+      }
+    };
+    void api.takeWorkflowFileRequests().then(inspectPaths).catch((error) => toast.push(`Workflow file requests could not be checked: ${String(error)}`, "error"));
+    void listen<string[]>("workflow-file-requested", (event) =>
+      void inspectPaths(event.payload),
+    ).then((unlisten) => cleanups.push(unlisten)).catch((error) => console.warn("Workflow file listener unavailable", error));
+    void listen<string>("quick-launcher-workflow", (event) =>
+      void useAppStore.getState().openWorkflow(event.payload),
+    ).then((unlisten) => cleanups.push(unlisten)).catch((error) => console.warn("Quick launcher listener unavailable", error));
+    void getCurrentWebviewWindow()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "drop") void inspectPaths(event.payload.paths);
+      })
+      .then((unlisten) => cleanups.push(unlisten))
+      .catch((error) => console.warn("File drop listener unavailable", error));
+    return () => {
+      cancelled = true;
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [toast]);
   useEffect(() => {
     if (deepLink?.kind !== "view") return;
     let cancelled = false;
@@ -157,8 +260,8 @@ export default function App() {
       else
         await api.listCloudWorkflowApprovals(deepLink.workspaceId, "all");
       if (cancelled) return;
-      localStorage.setItem("sandbox.cloud.workspace", deepLink.workspaceId);
-      localStorage.setItem("sandbox.cloud.section.v1", deepLink.section);
+      rememberLocal("sandbox.cloud.workspace", deepLink.workspaceId);
+      rememberLocal("sandbox.cloud.section.v1", deepLink.section);
       setView("cloud");
       window.setTimeout(() => window.dispatchEvent(new CustomEvent("sandbox:cloud-section", { detail: deepLink.section })), 0);
       toast.push("Opened the requested cloud workspace.", "success");
@@ -176,10 +279,10 @@ export default function App() {
     let stop: (() => void) | undefined;
     const add = (urls: string[]) =>
       setDeepLinks((current) => [...current, ...urls.filter((url) => !current.includes(url))]);
-    void api.takeDeepLinkRequests().then(add);
-    void listen<string[]>("deep-link-requested", (event) => add(event.payload)).then(
-      (unlisten) => (stop = unlisten),
-    );
+    void api.takeDeepLinkRequests().then(add).catch((error) => console.warn("Deep links could not be checked", error));
+    void listen<string[]>("deep-link-requested", (event) => add(event.payload))
+      .then((unlisten) => (stop = unlisten))
+      .catch((error) => console.warn("Deep-link listener unavailable", error));
     return () => stop?.();
   }, []);
   useEffect(() => {
@@ -216,10 +319,7 @@ export default function App() {
       setApprovalBusy(false);
     }
   };
-  const openCommands = () =>
-    view === "editor"
-      ? window.dispatchEvent(new CustomEvent("sandbox:open-node-picker"))
-      : setCommandOpen(true);
+  const openCommands = () => { setCommandOpen(true); window.dispatchEvent(new CustomEvent("sandbox:open-command-shell")); };
   const dismissDeepLink = () => setDeepLinks((current) => current.slice(1));
   const confirmDeepLink = async () => {
     if (!deepLink) return;
@@ -244,11 +344,58 @@ export default function App() {
       setDeepLinkBusy(false);
     }
   };
+  const dismissWorkflowImport = () => {
+    if (workflowImport)
+      void api.cancelWorkflowImport(workflowImport.inspectionId).catch((error) => console.warn("Workflow import cleanup failed", error));
+    setWorkflowImport(undefined);
+    setWorkflowImportError(undefined);
+  };
+  const confirmWorkflowImport = async () => {
+    if (!workflowImport) return;
+    setWorkflowImportBusy(true);
+    setWorkflowImportError(undefined);
+    try {
+      const workflow = await api.confirmWorkflowImport(
+        workflowImport.inspectionId,
+      );
+      setWorkflowImport(undefined);
+      await useAppStore.getState().load();
+      await useAppStore.getState().openWorkflow(workflow.id);
+      toast.push(`Imported ${workflow.name} disabled for review.`, "success");
+    } catch (error) {
+      setWorkflowImportError(String(error));
+    } finally {
+      setWorkflowImportBusy(false);
+    }
+  };
+  const joinSharedCanvas=async()=>{
+    const inviteCode=joinCollaborationCode.trim();if(!inviteCode)return;
+    setJoinCollaborationBusy(true);setJoinCollaborationError(undefined);
+    const deviceId=collaborationDeviceIdentity(),color=collaborationDeviceColor(deviceId);
+    let handle:CollaborationSessionHandle|undefined;
+    try{
+      handle=await api.joinWorkflowCollaboration(inviteCode,deviceId,color);
+      const existing=await api.getWorkflow(handle.session.workflowId);
+      const {bootstrapCollaborativeWorkflow}=await import("./collaborationBootstrap");
+      const bootstrapped=await bootstrapCollaborativeWorkflow(handle,existing,after=>api.pollWorkflowCollaborationOperations(handle!,after));
+      const saved=await api.saveCollaborationBootstrap(bootstrapped.workflow);
+      rememberCollaborationSession({handle,appliedSequence:bootstrapped.appliedSequence,clientSequence:0});
+      rememberLocal("sandbox.cloud.workspace",handle.session.workspaceId);
+      setJoinCollaborationOpen(false);setJoinCollaborationCode("");
+      await useAppStore.getState().load();
+      await useAppStore.getState().openWorkflow(saved.id);
+      toast.push(`Joined ${saved.name}. It is disabled until you review local permissions.`,"success");
+    }catch(error){
+      if(handle)void api.leaveWorkflowCollaboration(handle,deviceId).catch(()=>undefined);
+      setJoinCollaborationError(String(error));
+    }finally{setJoinCollaborationBusy(false)}
+  };
   return (
     <div className="app-shell">
       <Sidebar onCommand={openCommands} />
       <div className="app-main">
-        <AsyncErrorBoundary onHome={() => setView("workflows")}>
+        <div className="app-content-frame">
+        <AsyncErrorBoundary key={view} onHome={() => setView("workflows")}>
           <Suspense
             fallback={
               <main className="content route-loading" role="status">
@@ -265,116 +412,12 @@ export default function App() {
             {view === "editor" && activeWorkflow && <WorkflowEditor />}
           </Suspense>
         </AsyncErrorBoundary>
+        </div>
+        <Suspense fallback={null}><CommandShell open={commandOpen} onOpenChange={setCommandOpen} onShortcuts={() => setShortcutsOpen(true)} onLauncher={() => window.dispatchEvent(new CustomEvent("sandbox:open-quick-launcher"))} /></Suspense>
       </div>
       <Suspense fallback={null}><ActiveAiTabs /></Suspense>
-      <Suspense fallback={null}><CommandPalette
-        open={commandOpen}
-        onClose={() => setCommandOpen(false)}
-        onCreate={() => {
-          setView("workflows");
-          window.setTimeout(
-            () =>
-              window.dispatchEvent(new CustomEvent("sandbox:create-workflow")),
-            0,
-          );
-        }}
-        actions={[
-          {
-            id: "keyboard-shortcuts",
-            name: "Keyboard shortcuts",
-            description: "View available keyboard commands.",
-            group: "Help",
-            action: () => setShortcutsOpen(true),
-          },
-          {
-            id: "import-workflow",
-            name: "Import workflow",
-            description: "Choose a sndbox workflow file from this device.",
-            group: "Actions",
-            action: () =>
-              void api
-                .importWorkflow()
-                .then(async (workflow) => {
-                  if (!workflow) return;
-                  await useAppStore.getState().load();
-                  await useAppStore.getState().openWorkflow(workflow.id);
-                  toast.push(`Imported ${workflow.name}.`, "success");
-                })
-                .catch((error) => toast.push(String(error), "error")),
-          },
-          {
-            id: "workflows",
-            name: "Go to Workflows",
-            description: "Browse and organise local workflows.",
-            action: () => setView("workflows"),
-          },
-          {
-            id: "history",
-            name: "Go to Run history",
-            description: "Search execution diagnostics.",
-            action: () => setView("history"),
-          },
-          {
-            id: "plugins",
-            name: "Go to Plugins",
-            description: "Discover and manage plugins.",
-            action: () => setView("plugins"),
-          },
-          {
-            id: "cloud",
-            name: "Go to Cloud workspace",
-            description: "Manage account workspaces and encrypted sync.",
-            action: () => setView("cloud"),
-          },
-          {
-            id: "settings",
-            name: "Go to Settings",
-            description: "Change appearance and editor preferences.",
-            action: () => setView("settings"),
-          },
-          {
-            id: "approvals",
-            name: "Go to Pending approvals",
-            description: "Review paused workflow actions.",
-            action: () => setView("approvals"),
-          },
-          ...[
-            ["general", "General settings", "Start view, dates, and unsaved-change behavior."],
-            ["appearance", "Appearance settings", "Theme, accent, density, and sidebar layout."],
-            ["accessibility", "Accessibility settings", "Motion, contrast, and keyboard-friendly editing."],
-            ["nodes", "Node editor settings", "Canvas, grid, AI hints, and deletion preferences."],
-            ["connections", "Connection settings", "Credentials, OAuth connections, and the local vault."],
-            ["browser", "Browser settings", "Profiles, viewport, proxy, and browser runtime."],
-            ["beta", "Updates and beta settings", "Update channel and preview features."],
-          ].map(([section, name, description]) => ({
-            id: `settings-${section}`,
-            name,
-            description,
-            group: "Settings",
-            action: () => {
-              sessionStorage.setItem("sandbox:settings-section", section);
-              setView("settings");
-              window.setTimeout(() => window.dispatchEvent(new CustomEvent("sandbox:settings-section", { detail: section })), 0);
-            },
-          })),
-          ...WORKFLOW_TEMPLATES.map((template) => ({
-            id: `template-${template.key}`,
-            name: template.name,
-            description: template.description,
-            group: "Templates",
-            action: () => void useAppStore.getState().createWorkflow(template.key, template.name),
-          })),
-          ...workflows.map((item) => ({
-              id: `workflow-${item.workflow.id}`,
-              name: item.workflow.name,
-              description: `${item.metadata.folder ? `${item.metadata.folder} · ` : ""}${item.workflow.description || `${item.workflow.nodes.length} nodes`}`,
-              group: item.metadata.archivedAt ? "Archived workflows" : "Workflows",
-              action: () =>
-                void useAppStore.getState().openWorkflow(item.workflow.id),
-            })),
-        ]}
-      /></Suspense>
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} editor={view === "editor"} />
+      <Suspense fallback={null}><JoinCollaborationDialog open={joinCollaborationOpen} onOpenChange={open=>{setJoinCollaborationOpen(open);if(!open){setJoinCollaborationCode("");setJoinCollaborationError(undefined)}}} inviteCode={joinCollaborationCode} onInviteCodeChange={setJoinCollaborationCode} busy={joinCollaborationBusy} error={joinCollaborationError} onJoin={()=>void joinSharedCanvas()}/></Suspense>
       {approvalPrompt && (
         <Suspense fallback={null}>
           <ApprovalRequest
@@ -411,6 +454,32 @@ export default function App() {
         )}
         {deepLink?.kind === "template" && <div className="deep-link-review"><b>{deepLink.template.replaceAll("-", " ")}</b><small>Local workflow · disabled by default</small></div>}
         {deepLinkError && <div className="error-banner">{deepLinkError}</div>}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(workflowImport)}
+        onOpenChange={(open) => !open && dismissWorkflowImport()}
+        title="Import this workflow?"
+        description="The file has been inspected but has not been added. Importing creates fresh IDs, disables the workflow, and clears every inherited approval. It will never run automatically."
+        confirmLabel="Import disabled workflow"
+        busy={workflowImportBusy}
+        onConfirm={() => void confirmWorkflowImport()}
+      >
+        {workflowImport && (
+          <div className="deep-link-review workflow-import-review">
+            <b>{workflowImport.name}</b>
+            {workflowImport.description && <small>{workflowImport.description}</small>}
+            <small>
+              Schema {workflowImport.sourceSchemaVersion} · {workflowImport.nodeCount} nodes
+            </small>
+            <small>
+              Uses: {workflowImport.requiredNodeTypes.join(", ") || "No executable nodes"}
+            </small>
+            {workflowImport.warnings.map((warning) => (
+              <small key={warning} className="warning-banner">{warning}</small>
+            ))}
+          </div>
+        )}
+        {workflowImportError && <div className="error-banner">{workflowImportError}</div>}
       </ConfirmDialog>
     </div>
   );

@@ -135,6 +135,10 @@ const HOSTED_BUILT_INS: &[&str] = &[
     "merge",
     "remove_duplicates",
     "set_data",
+    "map_fields",
+    "validate_schema",
+    "text_template",
+    "hash_data",
     "delay",
     "http_request",
     "gmail_get_email",
@@ -385,6 +389,8 @@ mod tests {
             disabled: false,
             input_bindings: Default::default(),
             plugin: None,
+            customization: None,
+            error_policy: None,
         };
         let action = WorkflowNode {
             id: "action".into(),
@@ -400,6 +406,8 @@ mod tests {
             disabled: false,
             input_bindings: Default::default(),
             plugin: None,
+            customization: None,
+            error_policy: None,
         };
         Workflow {
             id: "workflow".into(),

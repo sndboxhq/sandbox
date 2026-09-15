@@ -14,7 +14,7 @@ export interface GettingStartedStep {
 
 export function DesktopGettingStarted({ steps }: { steps: GettingStartedStep[] }) {
   const [dismissed, setDismissed] = useState(
-    () => localStorage.getItem(DISMISSAL_KEY) === "dismissed",
+    () => { try { return localStorage.getItem(DISMISSAL_KEY) === "dismissed"; } catch { return false; } },
   );
   if (dismissed) return null;
   const completed = steps.filter((step) => step.complete).length;
@@ -30,7 +30,7 @@ export function DesktopGettingStarted({ steps }: { steps: GettingStartedStep[] }
           className="icon-button"
           aria-label="Dismiss getting started"
           onClick={() => {
-            localStorage.setItem(DISMISSAL_KEY, "dismissed");
+            try { localStorage.setItem(DISMISSAL_KEY, "dismissed"); } catch { /* dismissal persistence is optional */ }
             setDismissed(true);
           }}
         >

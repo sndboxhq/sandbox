@@ -1,0 +1,85 @@
+---
+title: "Custom Function"
+description: "A verified local ƒx node with an editable contract. Exact configuration, ports, placement, and execution behavior."
+icon: "braces"
+---
+
+**Node type:** `custom_function` · **Version:** `1` · **Category:** Data
+
+A verified local ƒx node with an editable contract. This node is not marked with the catalogue's generic side-effect flag. That classification is not a guarantee that every configured operation is read-only; review the concrete action and its destination.
+
+## When to use this node
+
+- Turn a focused JavaScript or Python transformation into a named local workflow node.
+- Define explicit inputs, outputs, and branches when a built-in node does not fit.
+
+## Example: Normalize an internal record
+
+Define a required object input, return a typed normalized output, and verify the behavior against representative fixtures.
+
+
+```json title="Example settings"
+{}
+```
+
+This shows the important settings, not a complete exported node.
+
+
+1. Open the full-page custom function editor and choose JavaScript or Python.
+2. Define the contract before writing the implementation.
+3. Add fixtures, run verification, and review coverage before connecting the node.
+
+
+## Configuration
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+
+
+
+## Workflow JSON
+
+The editor stores this node with the following implemented default configuration:
+
+```json title="Default node configuration"
+{
+  "type": "custom_function",
+  "version": 1,
+  "configuration": {}
+}
+```
+
+Values may be entered literally or mapped from an earlier compatible output when the inspector exposes a mapping control. See [Variables and data mapping](/workflows/variables-and-data).
+
+## Inputs
+
+This node has no typed ports in this direction.
+
+## Outputs
+
+This node has no typed ports in this direction.
+
+## Execution behavior
+
+- Custom functions run only on the local desktop in a restricted runtime with no ambient filesystem, network, environment, credential, browser, or plugin access.
+- A SHA-256 receipt binds successful verification to the exact function contract, source, and fixtures.
+- This node has no declared output ports; its value is in controlling when or how later work proceeds.
+
+## Common issues
+
+- Imports, duplication, and material edits invalidate the verification receipt.
+- Keep the contract narrow and use ordinary permissioned nodes for external side effects.
+
+
+## Where it can run
+
+- Desktop local runner
+
+## Test and inspect
+
+Use **Test node** in the editor to preview this step with the current configuration. A full run records resolved inputs, outputs, logs, duration, and any artifacts in the execution inspector. Side-effecting or destructive nodes can require an additional confirmation or approved workflow permission.
+
+## Related guides
+
+- [Code and Web Builder](/files-and-data/code-and-web-builder)
+- [Permissions](/workflows/permissions)

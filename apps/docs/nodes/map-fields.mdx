@@ -1,0 +1,114 @@
+---
+title: "Map Fields"
+description: "Project, rename, and default object fields without code. Exact configuration, ports, placement, and execution behavior."
+icon: "braces"
+---
+
+**Node type:** `map_fields` · **Version:** `1` · **Category:** Data
+
+Project, rename, and default object fields without code. This node is not marked with the catalogue's generic side-effect flag. That classification is not a guarantee that every configured operation is read-only; review the concrete action and its destination.
+
+## When to use this node
+
+- Project or rename object fields without writing code.
+- Apply explicit defaults while normalizing records from another system.
+
+## Example: Normalize a customer record
+
+Rename first_name to name, require the source field, and omit unrelated input properties.
+
+
+```json title="Example settings"
+{
+  "mappings": [
+    {
+      "source": "first_name",
+      "target": "name",
+      "required": true,
+      "default": null
+    }
+  ],
+  "preserveUnmapped": false
+}
+```
+
+This shows the important settings, not a complete exported node. Local paths must be selected, mapped from a trusted path, or covered by the runner's approved boundary.
+
+
+1. Connect an object-producing node.
+2. Add one mapping for each output field.
+3. Test missing required and optional fields before using the result.
+
+
+## Configuration
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `mappings` | array | `[{"source":"","target":"value","required":false,"default":null}]` | Ordered source-to-target field mappings with required and default behavior. |
+| `preserveUnmapped` | boolean | `false` | Keep source fields that are not explicitly mapped. |
+
+
+
+## Workflow JSON
+
+The editor stores this node with the following implemented default configuration:
+
+```json title="Default node configuration"
+{
+  "type": "map_fields",
+  "version": 1,
+  "configuration": {
+    "mappings": [
+      {
+        "source": "",
+        "target": "value",
+        "required": false,
+        "default": null
+      }
+    ],
+    "preserveUnmapped": false
+  }
+}
+```
+
+Values may be entered literally or mapped from an earlier compatible output when the inspector exposes a mapping control. See [Variables and data mapping](/workflows/variables-and-data).
+
+## Inputs
+
+| Port | Type | Required | Description |
+| --- | --- | --- | --- |
+| `input` | `object` | Yes | Input object |
+
+## Outputs
+
+| Port | Type | Required | Description |
+| --- | --- | --- | --- |
+| `value` | `object` | No | Mapped object |
+| `mappedCount` | `number` | No | Mapped fields |
+
+## Execution behavior
+
+- Mappings are applied in configured order and produce an explicit object shape.
+- Missing required fields fail; optional fields can use their configured default.
+- The editor catalogue declares `value` (object), `mappedCount` (number) for mapping. The execution inspector can contain additional evidence fields; inspect a real result before selecting nested paths from object or any outputs.
+
+## Common issues
+
+- Source and target values are object paths, not template expressions.
+- Enable preserveUnmapped only when downstream consumers should receive the remaining source data.
+
+
+## Where it can run
+
+- Desktop local runner
+- Paired self-hosted runner
+- Hosted runner
+
+## Test and inspect
+
+Use **Test node** in the editor to preview this step with the current configuration. A full run records resolved inputs, outputs, logs, duration, and any artifacts in the execution inspector. Side-effecting or destructive nodes can require an additional confirmation or approved workflow permission.
+
+## Related guides
+
+- [Variables and data mapping](/workflows/variables-and-data)
+- [JSON data](/files-and-data/json)

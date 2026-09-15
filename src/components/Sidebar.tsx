@@ -15,7 +15,7 @@ import {
   ShieldQuestion,
   Settings2,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { SndboxMark } from "@sandbox/product-ui/brand";
 import packageMetadata from "../../package.json";
 import { api } from "../api";
@@ -23,6 +23,7 @@ import { usePreferences } from "../preferences";
 import { useAppStore, type View } from "../store";
 import type { RunnerStatus } from "../types";
 import { DesktopUpdateNotice } from "./DesktopUpdateNotice";
+import { LatestNewsButton } from "./LatestNewsButton";
 import { ConfirmDialog } from "./ui/Dialog";
 import { Tooltip } from "./ui/Tooltip";
 import { useToast } from "./ui/Toast";
@@ -38,6 +39,7 @@ const initialRunner: RunnerStatus = {
   activeWorkflowIds: [],
   localSchedulesStopOnQuit: true,
   scheduledWorkflowCount: 0,
+  scheduledWorkflows: [],
 };
 
 export function Sidebar({ onCommand }: { onCommand: () => void }) {
@@ -47,16 +49,17 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
     confirmBeforeLeaving,
     update,
   } = usePreferences();
-  const { view, setView } = useAppStore();
+  const { view, setView, workflows } = useAppStore();
   const [narrow, setNarrow] = useState(() => window.innerWidth < 1280);
   const [pendingCount, setPendingCount] = useState(0);
   const [runner, setRunner] = useState<RunnerStatus>(initialRunner);
+  const [runnerError, setRunnerError] = useState(false);
   const [activeWorkflowNames, setActiveWorkflowNames] = useState<string[]>([]);
   const [nextView, setNextView] = useState<View>();
   const [runnerBusy, setRunnerBusy] = useState(false);
   const [bugReportOpen, setBugReportOpen] = useState(false);
   const collapsed = savedCollapsed || (view === "editor" && narrow);
-  const refresh = () => {
+  const refresh = useCallback(() => {
     void api
       .listPendingApprovals()
       .then((items) => setPendingCount(items.length))
@@ -64,6 +67,7 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
     void api
       .runnerStatus()
       .then(async (status) => {
+        setRunnerError(false);
         setRunner(status);
         if (!status.activeWorkflowIds.length) {
           setActiveWorkflowNames([]);
@@ -78,10 +82,9 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
           ),
         );
       })
-      .catch(() => {});
-  };
+      .catch(() => setRunnerError(true));
+  }, []);
   useEffect(() => {
-    refresh();
     const resize = () => setNarrow(window.innerWidth < 1280);
     const status = () => refresh();
     window.addEventListener("resize", resize);
@@ -90,7 +93,7 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
     if (api.isDesktop)
       void listen("runner-status-changed", status).then((stop) => {
         stopDesktop = stop;
-      });
+      }).catch(() => setRunnerError(true));
     const timer = window.setInterval(refresh, 15000);
     return () => {
       window.removeEventListener("resize", resize);
@@ -98,7 +101,10 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
       stopDesktop?.();
       window.clearInterval(timer);
     };
-  }, []);
+  }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh, workflows]);
   const navigate = (next: View) => {
     const dirty = (window as Window & { __sandboxUnsaved?: boolean })
       .__sandboxUnsaved;
@@ -178,20 +184,22 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
       <Popover.Root>
         <Popover.Trigger asChild>
           <button
-            className={`runner-button ${runner.paused ? "paused" : runner.activeWorkflowIds.length ? "running" : "active"}`}
-            aria-label={`Runner ${runner.paused ? "paused" : "active"}`}
+            className={`runner-button ${runnerError ? "unavailable" : runner.paused ? "paused" : runner.activeWorkflowIds.length ? "running" : "active"}`}
+            aria-label={`Runner ${runnerError ? "status unavailable" : runner.paused ? "paused" : "active"}`}
           >
             <i />
             {!collapsed && (
               <span>
                 <b>
-                  {runner.paused
+                  {runnerError
+                    ? "Runner unavailable"
+                    : runner.paused
                     ? "Runner paused"
                     : runner.activeWorkflowIds.length
                       ? "Running workflows"
                       : "Runner active"}
                 </b>
-                <small>{runner.scheduledWorkflowCount} scheduled</small>
+                <small>{runnerError ? "Click for details" : `${runner.scheduledWorkflowCount} scheduled`}</small>
               </span>
             )}
           </button>
@@ -200,10 +208,13 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
           <Popover.Content className="runner-popover" side="right" align="end">
             <h3>Local runner</h3>
             <p>
-              {runner.paused
+              {runnerError
+                ? "Runner status could not be refreshed. Existing workflow data is preserved; retry the connection."
+                : runner.paused
                 ? "New background triggers are paused. Manual runs are still available."
                 : "Schedule, file-watch, and polling triggers can start workflows."}
             </p>
+            {runnerError && <button className="button runner-retry" onClick={() => void refresh()}><Clock3 size={12}/>Retry status</button>}
             <dl>
               <div>
                 <dt>Running now</dt>
@@ -231,6 +242,27 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
                   ))}
                 </ul>
               </div>
+            )}
+            {runner.scheduledWorkflows.length > 0 ? (
+              <div className="runner-active-list runner-schedule-list">
+                <b>Scheduled workflows</b>
+                <ul>
+                  {runner.scheduledWorkflows.map((workflow) => (
+                    <li key={workflow.workflowId}>
+                      <span>{workflow.name}</span>
+                      <small>
+                        {!workflow.ready
+                          ? "Needs background permission"
+                          : workflow.nextRunAt
+                            ? `Next ${new Date(workflow.nextRunAt).toLocaleString()}`
+                            : "Ready for the next runner tick"}
+                      </small>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="runner-schedule-empty">No enabled schedule workflows.</p>
             )}
             <button
               className="button"
@@ -260,6 +292,7 @@ export function Sidebar({ onCommand }: { onCommand: () => void }) {
           <Bug size={16} />
           {!collapsed && <span>Report a bug</span>}
         </button>
+        <LatestNewsButton collapsed={collapsed} />
         <button aria-label="Open commands" onClick={onCommand}>
           <Command size={16} />
           {!collapsed && (

@@ -37,7 +37,9 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
   } = data as WorkflowNodeData;
   const definition = definitionFor(node.type);
   const annotation = node.type === "note";
-  const inputPorts = node.type === "web_builder"
+  const inputPorts = node.type === "custom_function"
+    ? (node.customization?.inputs.map(port=>({id:port.key,label:port.label})) ?? [])
+    : node.type === "web_builder"
     ? [...WEB_BUILDER_INPUT_PORTS]
     : node.type === "merge"
       ? ((node.configuration.inputPorts as Array<{id:string;name:string}> | undefined) ?? []).map(port=>({id:port.id,label:port.name}))
@@ -68,6 +70,7 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
         connectionRole={connectionRole}
         dimmed={dimmed}
         itemCount={itemCount}
+        fxBadge={node.type === "custom_function"}
       />
       <NodeAskAiAction
         node={node}
@@ -82,14 +85,19 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
 }
 
 function dynamicOutputPorts(node:WorkflowNode):Array<{id:string;label:string}>|undefined{
+  if((node.type==="code"||node.type==="javascript_code")&&node.configuration.executionMode==="source")return[{id:"code",label:"Source code"}];
+  if(node.type==="custom_function")return [...(node.customization?.outputs.map(port=>({id:port.key,label:port.label}))??[]),...(node.customization?.branches.map(port=>({id:port.key,label:port.label}))??[]),...(node.errorPolicy?.strategy==="route"?[{id:"error",label:"Error"}]:[])];
+  const error=node.errorPolicy?.strategy==="route"?[{id:"error",label:"Error"}]:[];
   if(node.type==="switch")return [
     ...(((node.configuration.cases as Array<{id:string;name:string}>|undefined)??[]).map(item=>({id:item.id,label:item.name}))),
-    {id:String(node.configuration.fallbackBranchId??"fallback"),label:String(node.configuration.fallbackName??"Fallback")},
+    {id:String(node.configuration.fallbackBranchId??"fallback"),label:String(node.configuration.fallbackName??"Fallback")},...error,
   ];
-  if(node.type==="filter")return [{id:"output",label:"Retained"},{id:"rejected",label:"Rejected"}];
-  if(node.type==="split_out")return [{id:"output",label:"Items"},{id:"rejected",label:"Rejected"}];
-  if(node.type==="loop_over_items")return [{id:"loop",label:"Loop"},{id:"done",label:"Done"}];
-  if(node.type==="remove_duplicates")return [{id:"output",label:"Unique"},{id:"duplicates",label:"Duplicates"}];
+  if(node.type==="filter")return [{id:"output",label:"Retained"},{id:"rejected",label:"Rejected"},...error];
+  if(node.type==="split_out")return [{id:"output",label:"Items"},{id:"rejected",label:"Rejected"},...error];
+  if(node.type==="loop_over_items")return [{id:"loop",label:"Loop"},{id:"done",label:"Done"},...error];
+  if(node.type==="remove_duplicates")return [{id:"output",label:"Unique"},{id:"duplicates",label:"Duplicates"},...error];
+  if(node.type==="validate_schema")return [{id:"valid",label:"Valid"},{id:"invalid",label:"Invalid"},...error];
+  if(error.length)return[{id:"output",label:"Output"},...error];
   return undefined;
 }
 

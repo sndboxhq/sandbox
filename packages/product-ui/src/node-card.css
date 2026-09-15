@@ -25,6 +25,7 @@
   box-shadow: 0 0 0 2px var(--accent-ring, rgba(214, 255, 75, 0.14)), 0 5px 20px rgba(0, 0, 0, 0.3);
 }
 .node-card.node-successful { border-color: rgba(99, 196, 141, 0.45); }
+.node-card.node-handled { border-color: rgba(216, 170, 94, 0.65); }
 .node-card.node-failed { border-color: rgba(225, 111, 112, 0.7); }
 .node-card.disabled { opacity: 0.5; }
 .node-card.connection-dimmed { opacity: 0.3; filter: saturate(.55); }
@@ -79,6 +80,7 @@
   display: grid;
   place-items: center;
 }
+.node-fx-badge{position:absolute;top:-6px;left:17px;min-width:18px;height:14px;padding:0 3px;border:1px solid var(--accent,#d6ff4b);border-radius:5px;background:var(--surface-raised,#151518);color:var(--accent,#d6ff4b);font:700 8px/12px "SFMono-Regular",Consolas,monospace;text-align:center}
 
 .node-state {
   width: 7px;
@@ -90,6 +92,7 @@
 
 .state-running { background: var(--accent, #d6ff4b); animation: productNodePulse 1.3s infinite; }
 .state-successful { background: var(--success, #63c48d); }
+.state-handled { background: var(--warning, #d8aa5e); }
 .state-failed { background: var(--error, #e16f70); }
 .state-skipped,
 .state-cancelled { background: #63646b; }

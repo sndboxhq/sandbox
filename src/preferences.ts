@@ -112,7 +112,23 @@ function readPreferences(): AppPreferences {
     }
     return { ...defaultPreferences };
   }
-  catch { return { ...defaultPreferences }; }
+  catch {
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+      // Restricted storage must not prevent the app from starting.
+    }
+    return { ...defaultPreferences };
+  }
+}
+
+function persistPreferences(preferences: AppPreferences): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+  } catch (error) {
+    console.warn("sndbox preferences could not be persisted", error);
+  }
 }
 
 interface PreferenceStore extends AppPreferences {
@@ -124,12 +140,12 @@ export const usePreferences = create<PreferenceStore>((set) => ({
   ...readPreferences(),
   update: (patch) => set((current) => {
     const next = normalisePreferences({ ...current, ...patch });
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    persistPreferences(next);
     return next;
   }),
   reset: () => set(() => {
     const next = { ...defaultPreferences };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    persistPreferences(next);
     return next;
   }),
 }));

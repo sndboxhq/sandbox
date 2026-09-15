@@ -376,7 +376,7 @@ fn due_schedule_workflows(
                 .nodes
                 .iter()
                 .find(|node| node.id == workflow.trigger_node_id)?;
-            if trigger.node_type != "schedule_trigger" {
+            if trigger.node_type != "schedule_trigger" || trigger.disabled {
                 return None;
             }
             let next_at = summary

@@ -8,13 +8,14 @@ const read = (file: string) => readFileSync(resolve(root, file), "utf8");
 describe("desktop startup bundle boundaries", () => {
   it("keeps large views behind lazy navigation boundaries", () => {
     const app = read("src/App.tsx");
-    for (const view of ["Dashboard", "HistoryView", "WorkflowEditor", "SettingsView", "PendingApprovalsView", "PluginsHub", "ApprovalRequest", "CommandPalette"]) {
+    for (const view of ["Dashboard", "HistoryView", "WorkflowEditor", "SettingsView", "PendingApprovalsView", "PluginsHub", "ApprovalRequest", "CommandShell"]) {
       expect(app, view).toContain(`const ${view} = lazy(`);
       expect(app, view).not.toMatch(new RegExp(`import \\{ ${view} \\} from`));
     }
     const pluginHub = read("src/components/PluginsHub.tsx");
     expect(pluginHub).toContain("const MarketplaceView = lazy(");
     expect(pluginHub).toContain("const InstalledPluginsView = lazy(");
+    expect(pluginHub).toContain("const PluginBuilderView = lazy(");
     expect(read("src/components/WorkflowEditor.tsx")).toContain("const NodeInspector = lazy(");
     expect(app).toContain("<LoadingSkeleton />");
   });
