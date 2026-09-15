@@ -37,6 +37,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://sandbox:sandbox@127.0.0.1:5432/sandbox_test
       TEST_DATABASE_URL: postgresql://sandbox:sandbox@127.0.0.1:5432/sandbox_test
+      PUPPETEER_SKIP_DOWNLOAD: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
