@@ -76,15 +76,18 @@ export function DesktopUpdateNotice({ collapsed = false }: { collapsed?: boolean
     }
   };
   const dismiss = () => {
-    localStorage.setItem(dismissalKey(update.version), String(Date.now()));
+    try { localStorage.setItem(dismissalKey(update.version), String(Date.now())); } catch { /* dismissal persistence is optional */ }
     setUpdate(undefined);
   };
 
   const versionLabel = formatVersionLabel(update.version);
   const action = update.installerUrl ? `Download sndbox ${versionLabel}` : `View sndbox ${versionLabel}`;
-  if (collapsed) return <button className="desktop-update-collapsed" title={action} aria-label={action} disabled={opening} onClick={() => void openUpdate()}><Download size={15}/></button>;
+  if (collapsed) return <button className="desktop-update-collapsed" title={action} aria-label={action} disabled={opening} onClick={() => void openUpdate()}><Download size={15}/><span className="desktop-update-dot" /></button>;
   return <aside className="desktop-update-notice" aria-live="polite">
-    <button className="desktop-update-link" title={action} aria-label={action} disabled={opening} onClick={() => void openUpdate()}><Download size={14}/><span>{opening ? "Opening download…" : update.installerUrl ? `Download ${versionLabel}` : `View ${versionLabel}`}</span></button>
+    <button className="desktop-update-link" title={action} aria-label={action} disabled={opening} onClick={() => void openUpdate()}>
+      <span className="desktop-update-icon"><Download size={14}/></span>
+      <span className="desktop-update-copy"><strong>{opening ? "Opening update…" : "Update available"}</strong><small>{versionLabel}</small></span>
+    </button>
     <button className="desktop-update-dismiss" aria-label={`Dismiss sndbox ${versionLabel} update`} title="Dismiss" onClick={dismiss}><X size={13}/></button>
   </aside>;
 }
@@ -98,6 +101,10 @@ function dismissalKey(version: string) {
 }
 
 function dismissedRecently(version: string): boolean {
-  const dismissedAt = Number(localStorage.getItem(dismissalKey(version)));
-  return Number.isFinite(dismissedAt) && dismissedAt > 0 && Date.now() - dismissedAt < DISMISSAL_MS;
+  try {
+    const dismissedAt = Number(localStorage.getItem(dismissalKey(version)));
+    return Number.isFinite(dismissedAt) && dismissedAt > 0 && Date.now() - dismissedAt < DISMISSAL_MS;
+  } catch {
+    return false;
+  }
 }

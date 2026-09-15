@@ -1,19 +1,28 @@
 import { listen } from "@tauri-apps/api/event";
 import { ShieldQuestion } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { PendingApproval } from "../types";
 import { ApprovalRequest } from "./ApprovalRequest";
+import { ErrorState, LoadingSkeleton } from "./ui/States";
 
 export function PendingApprovalsView() {
   const [items, setItems] = useState<PendingApproval[]>([]);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
-  const load = () =>
-    api
-      .listPendingApprovals()
-      .then(setItems)
-      .catch((value) => setError(String(value)));
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(undefined);
+    try {
+      const next = await api.listPendingApprovals();
+      setItems(next);
+    } catch (value) {
+      setError(String(value));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), 30000);
@@ -22,13 +31,13 @@ export function PendingApprovalsView() {
     for (const eventName of ["approval-requested", "approval-resolved"]) {
       void listen(eventName, () => void load()).then((value) =>
         stops.push(value),
-      );
+      ).catch((value) => setError(`Approval updates are unavailable: ${String(value)}`));
     }
     return () => {
       window.clearInterval(timer);
       stops.forEach((stop) => stop());
     };
-  }, []);
+  }, [load]);
   const resolve = async (id: string, approved: boolean) => {
     setBusy(id);
     setError(undefined);
@@ -52,8 +61,21 @@ export function PendingApprovalsView() {
         </div>
         <span className="approval-count">{items.length} pending</span>
       </header>
-      {error && <div className="error-banner">{error}</div>}
-      {items.length ? (
+      {error && items.length > 0 && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button className="button" onClick={() => void load()}>Retry</button>
+        </div>
+      )}
+      {loading && !items.length ? (
+        <LoadingSkeleton rows={4} />
+      ) : error && !items.length ? (
+        <ErrorState
+          title="Pending approvals could not load"
+          description={error}
+          onRetry={() => void load()}
+        />
+      ) : items.length ? (
         <div className="approval-list">
           {items.map((item) => (
             <ApprovalRequest

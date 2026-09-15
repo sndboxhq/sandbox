@@ -527,6 +527,7 @@ pub fn run() {
             commands::import_cloud_workflow_revision,
             commands::list_pending_approvals,
             commands::resolve_pending_approval,
+            commands::create_plugin_project,
             commands::inspect_plugin_package,
             commands::install_inspected_plugin,
             commands::list_installed_plugins,

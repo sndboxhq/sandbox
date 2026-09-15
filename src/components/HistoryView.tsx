@@ -41,6 +41,8 @@ export function HistoryView() {
   const [error, setError] = useState<string>();
   const [manageOpen, setManageOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pruneKeep, setPruneKeep] = useState<number>();
+  const [pruning, setPruning] = useState(false);
   const [debounced, setDebounced] = useState("");
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced(search), 300);
@@ -126,19 +128,16 @@ export function HistoryView() {
   const openEditor = async (nodeId?: string) => {
     if (!selectedExecution) return;
     const failedNodeId = nodeId ?? selectedExecution.nodeExecutions.find((node) => node.status === "failed")?.nodeId;
-    localStorage.setItem(
-      "sandbox.editor.recovery-context.v1",
-      JSON.stringify({
+    try {
+      localStorage.setItem("sandbox.editor.recovery-context.v1", JSON.stringify({
         workflowId: selectedExecution.workflowId,
         executionId: selectedExecution.id,
         nodeId: failedNodeId,
-      }),
-    );
-    if (failedNodeId)
-      localStorage.setItem(
-        "sandbox.editor.focus-node.v1",
-        JSON.stringify({ workflowId: selectedExecution.workflowId, nodeId: failedNodeId }),
-      );
+      }));
+      if (failedNodeId) localStorage.setItem("sandbox.editor.focus-node.v1", JSON.stringify({ workflowId: selectedExecution.workflowId, nodeId: failedNodeId }));
+    } catch {
+      // Opening the workflow is more important than optional recovery context.
+    }
     await openWorkflow(selectedExecution.workflowId);
   };
   const removeSelected = async () => {
@@ -154,10 +153,12 @@ export function HistoryView() {
     }
   };
   const prune = async (keep: number) => {
+    setPruning(true);
     try {
       const removed = await api.clearExecutionHistory(keep);
       selectExecution();
       setManageOpen(false);
+      setPruneKeep(undefined);
       await load();
       toast.push(
         `${removed} execution${removed === 1 ? "" : "s"} removed.`,
@@ -165,7 +166,13 @@ export function HistoryView() {
       );
     } catch (value) {
       toast.push(String(value), "error");
+    } finally {
+      setPruning(false);
     }
+  };
+  const requestPrune = (keep: number) => {
+    setManageOpen(false);
+    setPruneKeep(keep);
   };
   const clearFilters = () => {
     setSearch("");
@@ -225,13 +232,14 @@ export function HistoryView() {
           onRetryHeaded={retryHeaded}
           onEditNode={(nodeId) => void openEditor(nodeId)}
           onReviewPermissions={(request) => {
-            localStorage.setItem(
-              "sandbox.editor.permission-request.v1",
-              JSON.stringify({
+            try {
+              localStorage.setItem("sandbox.editor.permission-request.v1", JSON.stringify({
                 workflowId: selectedExecution.workflowId,
                 ...request,
-              }),
-            );
+              }));
+            } catch {
+              toast.push("Permission context could not be saved, but the workflow can still be opened.", "error");
+            }
             void openEditor(request.nodeId);
           }}
         />
@@ -437,24 +445,38 @@ export function HistoryView() {
         description="Deleting history also removes associated browser screenshots and traces from the application artifact directory."
       >
         <div className="manage-history-options">
-          <button onClick={() => void prune(100)}>
+          <button onClick={() => requestPrune(100)}>
             <b>Keep latest 100</b>
             <span>Delete older executions</span>
           </button>
-          <button onClick={() => void prune(50)}>
+          <button onClick={() => requestPrune(50)}>
             <b>Keep latest 50</b>
             <span>Delete older executions</span>
           </button>
-          <button onClick={() => void prune(10)}>
+          <button onClick={() => requestPrune(10)}>
             <b>Keep latest 10</b>
             <span>Delete older executions</span>
           </button>
-          <button className="danger-text" onClick={() => void prune(0)}>
+          <button className="danger-text" onClick={() => requestPrune(0)}>
             <Trash2 size={14} />
             <b>Delete all history</b>
           </button>
         </div>
       </Dialog>
+      <ConfirmDialog
+        open={pruneKeep !== undefined}
+        onOpenChange={(open) => !open && setPruneKeep(undefined)}
+        title={pruneKeep === 0 ? "Delete all run history?" : `Keep only the latest ${pruneKeep ?? 0} executions?`}
+        description={pruneKeep === 0
+          ? "Every local execution, log, output, browser screenshot, and trace will be permanently removed."
+          : `Executions older than the latest ${pruneKeep ?? 0}, including their logs and artifacts, will be permanently removed.`}
+        confirmLabel={pruneKeep === 0 ? "Delete all history" : "Remove older history"}
+        dangerous
+        busy={pruning}
+        onConfirm={() => {
+          if (pruneKeep !== undefined) void prune(pruneKeep);
+        }}
+      />
     </main>
   );
 }

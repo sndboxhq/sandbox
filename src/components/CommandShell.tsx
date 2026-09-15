@@ -12,6 +12,7 @@ import {
 import { useAppStore, type View } from "../store";
 import type { ExecutionRecord, Workflow, WorkflowNode } from "../types";
 import "../commandShell.css";
+import { readStoredJson, writeStoredJson } from "../safeStorage";
 
 type Link = { label: string; detail?: string; action: () => void };
 type Entry = { id: string; kind: "command" | "output" | "error"; text: string; links?: Link[] };
@@ -29,9 +30,7 @@ export function CommandShell({ open, onOpenChange, onShortcuts, onLauncher }: {
   const [input, setInput] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [pending, setPending] = useState<Pending>();
-  const [history, setHistory] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]") as string[]; } catch { return []; }
-  });
+  const [history, setHistory] = useState<string[]>(() => readStoredJson<unknown[]>(HISTORY_KEY, [], Array.isArray).filter((value): value is string => typeof value === "string"));
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,7 +56,7 @@ export function CommandShell({ open, onOpenChange, onShortcuts, onLauncher }: {
     if (!shouldPersistCommand(parsed)) return;
     setHistory((current) => {
       const next = [...current.filter((value) => value !== parsed.raw), parsed.raw].slice(-100);
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      try { writeStoredJson(HISTORY_KEY, next); } catch { /* optional shell history */ }
       return next;
     });
   };
@@ -139,8 +138,7 @@ async function execute(command: ParsedCommand, ui: { onShortcuts: () => void; on
   if (command.path === "help") return { text: helpText() };
   if (command.path === "clear") return { text: "", clear: true };
   if (command.path === "history") {
-    let values: string[] = [];
-    try { values = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]") as string[]; } catch { /* local history is optional */ }
+    const values = readStoredJson<unknown[]>(HISTORY_KEY, [], Array.isArray).filter((value): value is string => typeof value === "string");
     return { text: values.map((value, index) => `${index + 1}  ${value}`).join("\n") || "No stored command history." };
   }
   if (command.path.startsWith("go ")) {
@@ -208,7 +206,7 @@ async function execute(command: ParsedCommand, ui: { onShortcuts: () => void; on
   if (command.path.startsWith("runner ")) { if (command.path !== "runner status") await api.setRunnerPaused(command.path === "runner pause"); const status = await api.runnerStatus(); return { text: `Runner ${status.paused ? "paused" : "active"}; ${status.activeWorkflowIds.length} active, ${status.scheduledWorkflowCount} scheduled.` }; }
   if (command.path === "plugin list") { const plugins = await api.listInstalledPlugins(); return { text: `${plugins.length} plugin(s).`, links: plugins.map((plugin) => ({ label: plugin.manifest.name, detail: `${plugin.state} · ${plugin.pluginId}`, action: () => store.setView("plugins") })) }; }
   if (command.path === "plugin open") { store.setView("plugins"); return { text: "Opened Plugins." }; }
-  if (command.path === "connection list") { const connections = await api.listConnections(); return { text: `${connections.length} connection(s).`, links: connections.map((connection) => ({ label: connection.displayName, detail: `${connection.provider} · ${connection.status}`, action: () => { sessionStorage.setItem("sandbox:settings-section", "connections"); store.setView("settings"); } })) }; }
+  if (command.path === "connection list") { const connections = await api.listConnections(); return { text: `${connections.length} connection(s).`, links: connections.map((connection) => ({ label: connection.displayName, detail: `${connection.provider} · ${connection.status}`, action: () => { try { sessionStorage.setItem("sandbox:settings-section", "connections"); } catch { /* direct navigation still works */ } store.setView("settings"); } })) }; }
   if (command.path === "connection test") { const connections = await api.listConnections(); const connection = resolveTarget(target, connections.map((item) => ({ ...item, name: item.displayName }))); const result = await api.testConnection(connection.id); return { text: result.message }; }
   if (command.path === "approval list") { const approvals = await api.listPendingApprovals(); return { text: `${approvals.length} pending approval(s).`, links: approvals.map((item) => ({ label: String(item.action.type ?? "Approval"), detail: item.id, action: () => store.setView("approvals") })) }; }
   if (command.path === "approval open") { store.setView("approvals"); return { text: "Opened Pending approvals." }; }

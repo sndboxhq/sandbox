@@ -1,5 +1,5 @@
 import * as Tabs from "@radix-ui/react-tabs";
-import { Blocks, Search } from "lucide-react";
+import { Blocks, Braces, Search } from "lucide-react";
 import { Suspense, lazy, useEffect, useState } from "react";
 import { LoadingSkeleton } from "./ui/States";
 
@@ -11,6 +11,11 @@ const MarketplaceView = lazy(() =>
 const InstalledPluginsView = lazy(() =>
   import("./InstalledPluginsView").then((module) => ({
     default: module.InstalledPluginsView,
+  })),
+);
+const PluginBuilderView = lazy(() =>
+  import("./PluginBuilderView").then((module) => ({
+    default: module.PluginBuilderView,
   })),
 );
 
@@ -34,6 +39,10 @@ export function PluginsHub() {
             <Blocks size={14} />
             Installed
           </Tabs.Trigger>
+          <Tabs.Trigger value="build">
+            <Braces size={14} />
+            Build
+          </Tabs.Trigger>
         </Tabs.List>
       </div>
       <Suspense
@@ -48,6 +57,9 @@ export function PluginsHub() {
         </Tabs.Content>
         <Tabs.Content value="installed">
           <InstalledPluginsView />
+        </Tabs.Content>
+        <Tabs.Content value="build">
+          <PluginBuilderView />
         </Tabs.Content>
       </Suspense>
     </Tabs.Root>

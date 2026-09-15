@@ -1,17 +1,33 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Workflow, WorkflowNode } from "../types";
 import { CustomSelect } from "./ui/CustomSelect";
+import { ConfirmDialog } from "./ui/Dialog";
 import { IssueNotice } from "./ui/IssueNotice";
 
 type Props={workflow:Workflow;node:WorkflowNode;onChange:(node:WorkflowNode,workflowPatch?:Partial<Workflow>)=>void};
 type Rule={id:string;field:string;operator:string;value?:unknown};
 type SwitchCase={id:string;name:string;value?:unknown;combinator?:"all"|"any";rules?:Rule[]};
 type MergePort={id:string;name:string;required?:boolean};
+type PendingRemoval={kind:"case"|"input";connectedCount:number;apply:()=>void};
 const operators=["equals","not_equals","exists","not_exists","is_null","is_not_null","is_empty","is_not_empty","contains","not_contains","starts_with","ends_with","greater_than","greater_than_or_equal","less_than","less_than_or_equal","matches_regex","is_one_of","is_not_one_of","array_contains","date_before","date_after","date_between"];
 
 export function CollectionNodeInspector({workflow,node,onChange}:Props){
   const config=node.configuration;
   const set=(key:string,value:unknown)=>onChange({...node,configuration:{...config,[key]:value}});
+  const [pendingRemoval,setPendingRemoval]=useState<PendingRemoval>();
+  const requestRemoval=(kind:PendingRemoval["kind"],connectedCount:number,apply:()=>void)=>{
+    if(!connectedCount){apply();return;}
+    setPendingRemoval({kind,connectedCount,apply});
+  };
+  const removalDialog=<ConfirmDialog
+    open={Boolean(pendingRemoval)}
+    onOpenChange={(open)=>!open&&setPendingRemoval(undefined)}
+    title={`Remove connected ${pendingRemoval?.kind??"item"}?`}
+    description={`This also removes ${pendingRemoval?.connectedCount??0} connected branch${pendingRemoval?.connectedCount===1?"":"es"}. The downstream nodes remain on the canvas.`}
+    confirmLabel={`Remove ${pendingRemoval?.kind??"item"}`}
+    dangerous
+    onConfirm={()=>{const removal=pendingRemoval;setPendingRemoval(undefined);removal?.apply();}}
+  />;
   if(node.type==="filter")return <>
     <Info>Filter evaluates every workflow item. Condition is the simpler choice for one workflow-level true/false decision.</Info>
     <Field label="Mode"><CustomSelect value={String(config.mode??"keep_matches")} onChange={event=>set("mode",event.target.value)}><option value="keep_matches">Keep matching items</option><option value="remove_matches">Remove matching items</option></CustomSelect></Field>
@@ -25,11 +41,12 @@ export function CollectionNodeInspector({workflow,node,onChange}:Props){
     {config.routingMode==="value"&&<Field label="Value path"><input value={String(config.valuePath??"")} placeholder="status" onChange={event=>set("valuePath",event.target.value)}/></Field>}
     <SwitchCases cases={(config.cases as SwitchCase[]|undefined)??[]} routingMode={String(config.routingMode??"rules")} onChange={(cases,removedId)=>{
       const connected=removedId?workflow.edges.filter(edge=>edge.sourceNodeId===node.id&&edge.sourceHandle===removedId):[];
-      if(connected.length&&!window.confirm(`Remove this case and ${connected.length} connected branch${connected.length===1?"":"es"}?`))return;
-      onChange({...node,configuration:{...config,cases}},removedId?{edges:workflow.edges.filter(edge=>!(edge.sourceNodeId===node.id&&edge.sourceHandle===removedId))}:undefined);
+      const apply=()=>onChange({...node,configuration:{...config,cases}},removedId?{edges:workflow.edges.filter(edge=>!(edge.sourceNodeId===node.id&&edge.sourceHandle===removedId))}:undefined);
+      requestRemoval("case",connected.length,apply);
     }}/>
     <Field label="Fallback name"><input value={String(config.fallbackName??"Fallback")} onChange={event=>set("fallbackName",event.target.value)}/></Field>
     <Info>Case IDs stay stable when cases are renamed or reordered, so connected edges keep their identity.</Info>
+    {removalDialog}
   </>;
   if(node.type==="split_out")return <>
     <Field label="Array field path" hint="Empty means a top-level array"><input value={String(config.fieldPath??"")} placeholder="response.body.results" onChange={event=>set("fieldPath",event.target.value)}/></Field>
@@ -70,8 +87,8 @@ export function CollectionNodeInspector({workflow,node,onChange}:Props){
     <Field label="Mode"><CustomSelect value={String(config.mode??"wait_all")} onChange={event=>set("mode",event.target.value)}>{["wait_all","append","combine_position","combine_fields","cartesian","choose_branch"].map(value=><option key={value} value={value}>{value.replaceAll("_"," ")}</option>)}</CustomSelect></Field>
     <MergePorts ports={(config.inputPorts as MergePort[]|undefined)??[]} onChange={(ports,removedId)=>{
       const connected=removedId?workflow.edges.filter(edge=>edge.targetNodeId===node.id&&(edge.targetPort??edge.targetHandle)===removedId):[];
-      if(connected.length&&!window.confirm(`Remove this input and ${connected.length} connected branch${connected.length===1?"":"es"}?`))return;
-      onChange({...node,configuration:{...config,inputPorts:ports,priority:ports.map(port=>port.id)}},removedId?{edges:workflow.edges.filter(edge=>!(edge.targetNodeId===node.id&&(edge.targetPort??edge.targetHandle)===removedId))}:undefined);
+      const apply=()=>onChange({...node,configuration:{...config,inputPorts:ports,priority:ports.map(port=>port.id)}},removedId?{edges:workflow.edges.filter(edge=>!(edge.targetNodeId===node.id&&(edge.targetPort??edge.targetHandle)===removedId))}:undefined);
+      requestRemoval("input",connected.length,apply);
     }}/>
     {config.mode==="combine_position"&&<Field label="Unequal lengths"><CustomSelect value={String(config.unmatchedPolicy??"keep")} onChange={event=>set("unmatchedPolicy",event.target.value)}><option value="keep">Keep unmatched</option><option value="drop">Drop unmatched</option><option value="fail">Fail</option></CustomSelect></Field>}
     {config.mode==="combine_fields"&&<><div className="field-grid"><Field label="Left key"><input value={String(config.leftKey??"id")} onChange={event=>set("leftKey",event.target.value)}/></Field><Field label="Right key"><input value={String(config.rightKey??"id")} onChange={event=>set("rightKey",event.target.value)}/></Field></div><Field label="Join"><CustomSelect value={String(config.join??"inner")} onChange={event=>set("join",event.target.value)}><option value="inner">Inner</option><option value="left">Left</option><option value="right">Right</option><option value="full">Full outer</option></CustomSelect></Field></>}
@@ -81,6 +98,7 @@ export function CollectionNodeInspector({workflow,node,onChange}:Props){
     <Field label="Failed input"><CustomSelect value={String(config.failedInputPolicy??"fail")} onChange={event=>set("failedInputPolicy",event.target.value)}><option value="fail">Fail Merge</option><option value="empty">Treat as empty</option></CustomSelect></Field>
     <Field label="Skipped input"><CustomSelect value={String(config.skippedInputPolicy??"empty")} onChange={event=>set("skippedInputPolicy",event.target.value)}><option value="empty">Treat as empty</option><option value="fail">Fail Merge</option></CustomSelect></Field>
     <Info>Merge uses configured port order, never branch arrival timing. Empty inputs remain visible in execution evidence.</Info>
+    {removalDialog}
   </>;
   return null;
 }

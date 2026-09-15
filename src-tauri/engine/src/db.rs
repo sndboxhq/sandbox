@@ -886,6 +886,7 @@ impl Database {
 
     pub fn save_workflow(&self, workflow: Workflow) -> Result<Workflow, EngineError> {
         let mut workflow = migrate_workflow(workflow)?;
+        crate::validation::repair_trigger_reference(&mut workflow);
         let previous = self.get_workflow(&workflow.id)?;
         if let Some(old) = &previous {
             if dangerous_fingerprint(old) != dangerous_fingerprint(&workflow) {

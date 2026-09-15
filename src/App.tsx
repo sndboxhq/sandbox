@@ -22,6 +22,8 @@ import { parseDeepLink, type DeepLinkRequest } from "./deepLinks";
 import "./plugins.css";
 import { collaborationDeviceColor, collaborationDeviceIdentity, rememberCollaborationSession } from "./collaborationSession";
 
+const rememberLocal = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* optional navigation state */ } };
+
 const Dashboard = lazy(() =>
   import("./components/Dashboard").then((module) => ({
     default: module.Dashboard,
@@ -157,7 +159,7 @@ function MainApp() {
     let stop: (() => void) | undefined;
     void listen<string>("navigate", (event) => {
       if (event.payload === "approvals") setView("approvals");
-    }).then((unlisten) => (stop = unlisten));
+    }).then((unlisten) => (stop = unlisten)).catch((error) => console.warn("Navigation listener unavailable", error));
     return () => stop?.();
   }, [setView]);
   useEffect(() => {
@@ -165,10 +167,11 @@ function MainApp() {
     let stop: (() => void) | undefined;
     void api
       .listPendingApprovals()
-      .then((items) => setApprovalPrompt(items[0]));
+      .then((items) => setApprovalPrompt(items[0]))
+      .catch((error) => console.warn("Pending approvals could not be checked", error));
     void listen<PendingApproval>("approval-requested", (event) =>
       setApprovalPrompt(event.payload),
-    ).then((unlisten) => (stop = unlisten));
+    ).then((unlisten) => (stop = unlisten)).catch((error) => console.warn("Approval listener unavailable", error));
     return () => stop?.();
   }, []);
   useEffect(() => {
@@ -224,18 +227,19 @@ function MainApp() {
         if (!cancelled) toast.push(String(error), "error");
       }
     };
-    void api.takeWorkflowFileRequests().then(inspectPaths);
+    void api.takeWorkflowFileRequests().then(inspectPaths).catch((error) => toast.push(`Workflow file requests could not be checked: ${String(error)}`, "error"));
     void listen<string[]>("workflow-file-requested", (event) =>
       void inspectPaths(event.payload),
-    ).then((unlisten) => cleanups.push(unlisten));
+    ).then((unlisten) => cleanups.push(unlisten)).catch((error) => console.warn("Workflow file listener unavailable", error));
     void listen<string>("quick-launcher-workflow", (event) =>
       void useAppStore.getState().openWorkflow(event.payload),
-    ).then((unlisten) => cleanups.push(unlisten));
+    ).then((unlisten) => cleanups.push(unlisten)).catch((error) => console.warn("Quick launcher listener unavailable", error));
     void getCurrentWebviewWindow()
       .onDragDropEvent((event) => {
         if (event.payload.type === "drop") void inspectPaths(event.payload.paths);
       })
-      .then((unlisten) => cleanups.push(unlisten));
+      .then((unlisten) => cleanups.push(unlisten))
+      .catch((error) => console.warn("File drop listener unavailable", error));
     return () => {
       cancelled = true;
       cleanups.forEach((cleanup) => cleanup());
@@ -256,8 +260,8 @@ function MainApp() {
       else
         await api.listCloudWorkflowApprovals(deepLink.workspaceId, "all");
       if (cancelled) return;
-      localStorage.setItem("sandbox.cloud.workspace", deepLink.workspaceId);
-      localStorage.setItem("sandbox.cloud.section.v1", deepLink.section);
+      rememberLocal("sandbox.cloud.workspace", deepLink.workspaceId);
+      rememberLocal("sandbox.cloud.section.v1", deepLink.section);
       setView("cloud");
       window.setTimeout(() => window.dispatchEvent(new CustomEvent("sandbox:cloud-section", { detail: deepLink.section })), 0);
       toast.push("Opened the requested cloud workspace.", "success");
@@ -275,10 +279,10 @@ function MainApp() {
     let stop: (() => void) | undefined;
     const add = (urls: string[]) =>
       setDeepLinks((current) => [...current, ...urls.filter((url) => !current.includes(url))]);
-    void api.takeDeepLinkRequests().then(add);
-    void listen<string[]>("deep-link-requested", (event) => add(event.payload)).then(
-      (unlisten) => (stop = unlisten),
-    );
+    void api.takeDeepLinkRequests().then(add).catch((error) => console.warn("Deep links could not be checked", error));
+    void listen<string[]>("deep-link-requested", (event) => add(event.payload))
+      .then((unlisten) => (stop = unlisten))
+      .catch((error) => console.warn("Deep-link listener unavailable", error));
     return () => stop?.();
   }, []);
   useEffect(() => {
@@ -342,7 +346,7 @@ function MainApp() {
   };
   const dismissWorkflowImport = () => {
     if (workflowImport)
-      void api.cancelWorkflowImport(workflowImport.inspectionId);
+      void api.cancelWorkflowImport(workflowImport.inspectionId).catch((error) => console.warn("Workflow import cleanup failed", error));
     setWorkflowImport(undefined);
     setWorkflowImportError(undefined);
   };
@@ -376,7 +380,7 @@ function MainApp() {
       const bootstrapped=await bootstrapCollaborativeWorkflow(handle,existing,after=>api.pollWorkflowCollaborationOperations(handle!,after));
       const saved=await api.saveCollaborationBootstrap(bootstrapped.workflow);
       rememberCollaborationSession({handle,appliedSequence:bootstrapped.appliedSequence,clientSequence:0});
-      localStorage.setItem("sandbox.cloud.workspace",handle.session.workspaceId);
+      rememberLocal("sandbox.cloud.workspace",handle.session.workspaceId);
       setJoinCollaborationOpen(false);setJoinCollaborationCode("");
       await useAppStore.getState().load();
       await useAppStore.getState().openWorkflow(saved.id);
@@ -391,7 +395,7 @@ function MainApp() {
       <Sidebar onCommand={openCommands} />
       <div className="app-main">
         <div className="app-content-frame">
-        <AsyncErrorBoundary onHome={() => setView("workflows")}>
+        <AsyncErrorBoundary key={view} onHome={() => setView("workflows")}>
           <Suspense
             fallback={
               <main className="content route-loading" role="status">

@@ -32,13 +32,18 @@
   letter-spacing: .03em;
 }
 
-.desktop-update-notice { min-height: 34px; display: grid; grid-template-columns: 1fr 28px; align-items: center; margin: 0 0 9px; border: 1px solid rgba(66, 133, 255, .24); border-radius: 5px; background: rgba(18, 42, 84, .56); overflow: hidden; }
-.desktop-update-link, .desktop-update-dismiss, .desktop-update-collapsed { border: 0; border-radius: 0; background: transparent; color: #4f8fff; }
-.desktop-update-link { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 9px; text-align: left; font-size: 10px; }
-.desktop-update-link span { color: #6d9dff; }
-.desktop-update-dismiss { height: 28px; display: grid; place-items: center; padding: 0; opacity: .75; }
-.desktop-update-notice button:hover { background: rgba(66, 133, 255, .1); opacity: 1; }
-.desktop-update-collapsed { width: 32px; height: 32px; display: grid; place-items: center; margin: 0 auto 9px; border: 1px solid rgba(66, 133, 255, .24); border-radius: 5px; background: rgba(18, 42, 84, .56); }
+.desktop-update-notice { height: 36px; display: grid; grid-template-columns: minmax(0,1fr) 27px; align-items: stretch; margin: 0 0 9px; border: 1px solid #3c8cf0; border-radius: 6px; background: linear-gradient(135deg,#0b67d5,#084ba9); box-shadow: 0 3px 10px rgba(8,75,169,.18); overflow: hidden; }
+.sidebar .desktop-update-link, .sidebar .desktop-update-dismiss, .sidebar .desktop-update-collapsed { border: 0; border-radius: 0; background-color: transparent; color: #eaf4ff; }
+.desktop-update-link { min-width: 0; min-height: 34px; display: flex; align-items: center; gap: 7px; padding: 3px 6px; text-align: left; }
+.desktop-update-icon { width: 23px; height: 23px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid #70b3ff; border-radius: 5px; background: #176fce; color: #eaf4ff; }
+.desktop-update-copy { min-width: 0; display: grid; gap: 2px; }
+.desktop-update-copy strong { color: #f2f8ff; font-size: 9px; font-weight: 700; line-height: 1; white-space: nowrap; }
+.desktop-update-copy small { color: #a9d3ff; font: 7px/1 "SFMono-Regular",Consolas,monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar .desktop-update-dismiss { min-height: 34px; display: grid; place-items: center; padding: 0; color: #a9d3ff; opacity: .85; }
+.desktop-update-notice button:hover { background: rgba(115,184,255,.16); color: #fff; opacity: 1; }
+.desktop-update-collapsed { position: relative; width: 34px; height: 34px; display: grid; place-items: center; margin: 0 auto 9px; border: 1px solid #3c8cf0; border-radius: 7px; background: linear-gradient(135deg,#0b67d5,#084ba9); box-shadow: 0 4px 12px rgba(8,75,169,.22); }
+.desktop-update-collapsed:hover { background: #0b67d5; }
+.desktop-update-dot { position: absolute; right: 4px; top: 4px; width: 5px; height: 5px; border-radius: 50%; background: #9ed0ff; box-shadow: 0 0 0 2px #0a56bb; }
 
 .settings-topbar { height: 46px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 11px; }
 .settings-reset { height: 30px; display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--text-secondary); font-size: 10px; }

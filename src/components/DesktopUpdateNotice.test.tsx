@@ -38,6 +38,8 @@ describe("DesktopUpdateNotice", () => {
   it("names the available version and opens its installer download", async () => {
     render(<ToastProvider><DesktopUpdateNotice /></ToastProvider>);
 
+    expect(await screen.findByText("Update available")).toBeVisible();
+    expect(screen.getByText("v0.7.4-beta.3")).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "Download sndbox v0.7.4-beta.3" }));
 
     await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith(update.installerUrl));

@@ -47,6 +47,7 @@ import type {
 } from "./types";
 import { previewApi } from "./previewApi";
 const tauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export interface PluginStarterFile { path: string; contents: string }
 export const api = {
   takeDeepLinkRequests: () =>
     tauri ? invoke<string[]>("take_deep_link_requests") : Promise.resolve([]),
@@ -540,6 +541,10 @@ export const api = {
       : Promise.resolve([]),
   resolvePendingApproval: (id: string, approved: boolean) =>
     invoke<void>("resolve_pending_approval", { id, approved }),
+  createPluginProject: (projectName: string, files: PluginStarterFile[]) =>
+    tauri
+      ? invoke<string | undefined>("create_plugin_project", { projectName, files })
+      : Promise.resolve(undefined),
   inspectPluginPackage: (trust: PackageTrustMetadata) =>
     tauri
       ? invoke<PluginPackageInspection | undefined>("inspect_plugin_package", {

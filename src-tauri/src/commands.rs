@@ -21,7 +21,8 @@ use sandbox_engine::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::hash_map::Entry;
+use std::collections::{hash_map::Entry, HashSet};
+use std::path::Component;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
@@ -279,6 +280,90 @@ pub fn set_desktop_integration_settings(
 #[tauri::command]
 pub fn take_deep_link_requests(state: State<'_, AppState>) -> Vec<String> {
     std::mem::take(&mut *state.pending_deep_links.lock())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginStarterFile {
+    pub path: String,
+    pub contents: String,
+}
+
+#[tauri::command]
+pub async fn create_plugin_project(
+    project_name: String,
+    files: Vec<PluginStarterFile>,
+    app: AppHandle,
+) -> Result<Option<String>> {
+    if project_name.is_empty()
+        || project_name.len() > 80
+        || project_name.starts_with('.')
+        || !project_name.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
+    {
+        return Err("Project folder must use 1-80 lowercase letters, numbers, or hyphens.".into());
+    }
+    if files.is_empty()
+        || files.len() > 50
+        || files.iter().map(|file| file.contents.len()).sum::<usize>() > 2_000_000
+    {
+        return Err("The plugin starter is empty or exceeds the safe scaffold limit.".into());
+    }
+    let mut seen = HashSet::new();
+    for file in &files {
+        let path = std::path::Path::new(&file.path);
+        if file.path.is_empty()
+            || path.is_absolute()
+            || !path
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+            || !seen.insert(file.path.clone())
+        {
+            return Err(format!(
+                "Plugin starter contains an unsafe or duplicate path: {}",
+                file.path
+            ));
+        }
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let Some(selection) = app
+            .dialog()
+            .file()
+            .set_title("Choose a folder for the plugin project")
+            .blocking_pick_folder()
+        else {
+            return Ok(None);
+        };
+        let parent = selection.into_path().map_err(err)?;
+        let target = parent.join(&project_name);
+        if target.exists() {
+            return Err(format!(
+                "A file or folder named '{project_name}' already exists there."
+            ));
+        }
+        let staging = parent.join(format!(".sndbox-plugin-{}", Uuid::new_v4()));
+        std::fs::create_dir(&staging).map_err(err)?;
+        let write_result = (|| -> Result<()> {
+            for file in files {
+                let destination = staging.join(&file.path);
+                if let Some(parent) = destination.parent() {
+                    std::fs::create_dir_all(parent).map_err(err)?;
+                }
+                std::fs::write(destination, file.contents).map_err(err)?;
+            }
+            std::fs::rename(&staging, &target).map_err(err)?;
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = std::fs::remove_dir_all(&staging);
+        }
+        write_result?;
+        Ok(Some(target.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(err)?
 }
 
 #[tauri::command]
@@ -2302,43 +2387,69 @@ pub struct RunnerStatus {
     active_workflow_ids: Vec<String>,
     local_schedules_stop_on_quit: bool,
     scheduled_workflow_count: usize,
+    scheduled_workflows: Vec<RunnerScheduledWorkflow>,
     next_run_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunnerScheduledWorkflow {
+    workflow_id: String,
+    name: String,
+    next_run_at: Option<DateTime<Utc>>,
+    ready: bool,
+}
 #[tauri::command]
-pub fn runner_status(state: State<'_, AppState>) -> RunnerStatus {
+pub fn runner_status(state: State<'_, AppState>) -> Result<RunnerStatus> {
     let scheduled = state
         .engine
         .database()
         .list_workflows()
-        .unwrap_or_default()
+        .map_err(err)?
         .into_iter()
         .filter(|item| {
             item.workflow.enabled
-                && item
-                    .workflow
-                    .nodes
-                    .iter()
-                    .any(|node| node.node_type == "schedule_trigger")
+                && item.workflow.nodes.iter().any(|node| {
+                    node.id == item.workflow.trigger_node_id
+                        && node.node_type == "schedule_trigger"
+                        && !node.disabled
+                })
         })
         .collect::<Vec<_>>();
-    RunnerStatus {
+    let scheduled_workflows = scheduled
+        .iter()
+        .map(|item| RunnerScheduledWorkflow {
+            workflow_id: item.workflow.id.clone(),
+            name: item.workflow.name.clone(),
+            next_run_at: item.next_run_at,
+            ready: item
+                .workflow
+                .settings
+                .permissions
+                .background_execution_permitted,
+        })
+        .collect();
+    Ok(RunnerStatus {
         paused: state.paused.load(Ordering::SeqCst),
         active_workflow_ids: state.cancellations.lock().keys().cloned().collect(),
         local_schedules_stop_on_quit: true,
         scheduled_workflow_count: scheduled.len(),
-        next_run_at: scheduled
-            .into_iter()
-            .filter_map(|item| item.next_run_at)
-            .min(),
-    }
+        scheduled_workflows,
+        next_run_at: scheduled.iter().filter_map(|item| item.next_run_at).min(),
+    })
 }
 
 #[tauri::command]
-pub fn set_runner_paused(paused: bool, app: AppHandle, state: State<'_, AppState>) -> RunnerStatus {
+pub fn set_runner_paused(
+    paused: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RunnerStatus> {
+    let mut status = runner_status(state.clone())?;
     state.paused.store(paused, Ordering::SeqCst);
-    let status = runner_status(state);
+    status.paused = paused;
     let _ = app.emit("runner-status-changed", &status);
-    status
+    Ok(status)
 }
 
 #[tauri::command]

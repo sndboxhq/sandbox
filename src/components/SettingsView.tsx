@@ -69,11 +69,13 @@ const settingsSections: Array<{
 export function SettingsView() {
   const preferences = usePreferences();
   const [section, setSection] = useState<SettingsSectionId>(() => {
-    const requested = window.sessionStorage.getItem("sandbox:settings-section");
-    window.sessionStorage.removeItem("sandbox:settings-section");
-    return settingsSections.some((item) => item.id === requested)
-      ? (requested as SettingsSectionId)
-      : "general";
+    try {
+      const requested = window.sessionStorage.getItem("sandbox:settings-section");
+      window.sessionStorage.removeItem("sandbox:settings-section");
+      return settingsSections.some((item) => item.id === requested) ? requested as SettingsSectionId : "general";
+    } catch {
+      return "general";
+    }
   });
   const [profiles, setProfiles] = useState<BrowserProfile[]>([]);
   const [engine, setEngine] = useState<BrowserEngineStatus>();
@@ -132,18 +134,14 @@ export function SettingsView() {
   }, []);
 
   const load = async () => {
-    try {
-      const [nextProfiles, nextEngine, nextDesktop] = await Promise.all([
-        api.listBrowserProfiles(),
-        api.browserEngineStatus(),
-        api.desktopIntegrationSettings(),
-      ]);
-      setProfiles(nextProfiles);
-      setEngine(nextEngine);
-      setDesktop(nextDesktop);
-    } catch (value) {
-      setError(`Settings could not load: ${String(value)}`);
-    }
+    const [profileResult, engineResult, desktopResult] = await Promise.allSettled([
+      api.listBrowserProfiles(), api.browserEngineStatus(), api.desktopIntegrationSettings(),
+    ]);
+    if (profileResult.status === "fulfilled") setProfiles(profileResult.value);
+    if (engineResult.status === "fulfilled") setEngine(engineResult.value);
+    if (desktopResult.status === "fulfilled") setDesktop(desktopResult.value);
+    const failed = [profileResult, engineResult, desktopResult].filter(result => result.status === "rejected");
+    setError(failed.length ? `${failed.length} settings service${failed.length === 1 ? "" : "s"} could not load. Working sections remain available.` : undefined);
   };
 
   useEffect(() => {
@@ -327,7 +325,7 @@ export function SettingsView() {
                 >
                   Apply desktop settings
                 </button>
-                <button className="button" onClick={() => void api.openQuickLauncher()}>
+                <button className="button" onClick={() => void act(() => api.openQuickLauncher())}>
                   Open quick launcher
                 </button>
               </div>

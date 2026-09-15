@@ -3206,17 +3206,23 @@ async fn execute_code(
             "Code could not start {executable}. Install it or switch this node to source mode: {error}"
         ))
     })?;
-    let mut stdin = child.stdin.take().expect("piped stdin");
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        EngineError::Node("Code runtime did not provide its configured input pipe.".into())
+    })?;
     let encoded_payload = serde_json::to_vec(&payload)
         .map_err(|error| EngineError::Node(format!("Code input could not be encoded: {error}")))?;
     tokio::spawn(async move {
         let _ = stdin.write_all(&encoded_payload).await;
     });
     let stdout_task = tokio::spawn(read_bounded_to(
-        child.stdout.take().expect("piped stdout"),
+        child.stdout.take().ok_or_else(|| {
+            EngineError::Node("Code runtime did not provide its configured output pipe.".into())
+        })?,
         1_048_576,
     ));
-    let stderr_task = tokio::spawn(read_bounded(child.stderr.take().expect("piped stderr")));
+    let stderr_task = tokio::spawn(read_bounded(child.stderr.take().ok_or_else(|| {
+        EngineError::Node("Code runtime did not provide its configured error pipe.".into())
+    })?));
     let timeout_ms = node
         .configuration
         .get("timeoutMs")
@@ -3240,9 +3246,14 @@ async fn execute_code(
             }
         }
     };
-    let stdout_bytes = stdout_task.await.unwrap_or_default();
+    let stdout_bytes = stdout_task.await.map_err(|error| {
+        EngineError::Node(format!("Code output reader stopped unexpectedly: {error}"))
+    })?;
     let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
-    let stderr = String::from_utf8_lossy(&stderr_task.await.unwrap_or_default()).to_string();
+    let stderr_bytes = stderr_task.await.map_err(|error| {
+        EngineError::Node(format!("Code error reader stopped unexpectedly: {error}"))
+    })?;
+    let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
     let _ = tokio::fs::remove_file(&script_path).await;
     if !status.success() {
         return Err(EngineError::Node(format!(
@@ -4493,13 +4504,25 @@ async fn execute_command(
     let mut child = command.spawn().map_err(|e| {
         EngineError::Node(format!("Run Command could not start '{executable}': {e}"))
     })?;
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child.stdout.take().ok_or_else(|| {
+        EngineError::Node("Run Command did not provide its configured output pipe.".into())
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        EngineError::Node("Run Command did not provide its configured error pipe.".into())
+    })?;
     let stdout_task = tokio::spawn(read_bounded(stdout));
     let stderr_task = tokio::spawn(read_bounded(stderr));
     let output = tokio::select! { _=cancellation.cancelled()=>{ let _=child.kill().await; return Err(EngineError::Cancelled); }, status=child.wait()=>status.map_err(|e|EngineError::Node(format!("Run Command could not wait for '{executable}': {e}")))? };
-    let out = stdout_task.await.unwrap_or_default();
-    let err = stderr_task.await.unwrap_or_default();
+    let out = stdout_task.await.map_err(|error| {
+        EngineError::Node(format!(
+            "Run Command output reader stopped unexpectedly: {error}"
+        ))
+    })?;
+    let err = stderr_task.await.map_err(|error| {
+        EngineError::Node(format!(
+            "Run Command error reader stopped unexpectedly: {error}"
+        ))
+    })?;
     let stdout = String::from_utf8_lossy(&out).to_string();
     let stderr = String::from_utf8_lossy(&err).to_string();
     if !output.success() {

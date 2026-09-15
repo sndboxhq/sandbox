@@ -55,6 +55,7 @@ import {
 } from "../catalogue";
 import { usePreferences } from "../preferences";
 import { useAppStore } from "../store";
+import { repairWorkflowTriggerReference } from "../workflowTriggers";
 import { issueFingerprint, issuePriority } from "../issues";
 import { useIssueTracking } from "../issueTracking";
 import {
@@ -226,12 +227,16 @@ function readRecoveryContext(workflowId: string): RecoveryContext | undefined {
 }
 
 const collaborationWorkspaceStorageKey = "sandbox.cloud.workspace";
+const readCollaborationWorkspace = () => {
+  try { return localStorage.getItem(collaborationWorkspaceStorageKey) ?? ""; }
+  catch { return ""; }
+};
 
 export function WorkflowEditor() {
   const toast = useToast();
   const { activeWorkflow, setView, saveWorkflow } = useAppStore();
   const [workflow, setWorkflow] = useState(() =>
-    structuredClone(activeWorkflow!),
+    repairWorkflowTriggerReference(structuredClone(activeWorkflow!)),
   );
   const [initialViewport] = useState(() => {
     try {
@@ -403,7 +408,7 @@ export function WorkflowEditor() {
       past.current.push(structuredClone(workflow));
       if (past.current.length > 50) past.current.shift();
       future.current = [];
-      const secured=invalidatePermissionApprovals(workflow,next);
+      const secured=invalidatePermissionApprovals(workflow,repairWorkflowTriggerReference(next));
       publishCollaborativeChange(workflow,secured);
       setWorkflow(secured);
     },
@@ -513,7 +518,7 @@ export function WorkflowEditor() {
       );
   }, [accessibleEditorOpen]);
   useEffect(() => {
-    void api.listBrowserProfiles().then(setBrowserProfiles);
+    void api.listBrowserProfiles().then(setBrowserProfiles).catch(() => setBrowserProfiles([]));
   }, []);
   useEffect(() => {
     const owner = workflow.owner ?? {
@@ -522,7 +527,8 @@ export function WorkflowEditor() {
     };
     void api
       .listInstalledPlugins(owner.ownerType, owner.ownerId)
-      .then(setInstalledPlugins);
+      .then(setInstalledPlugins)
+      .catch(() => setInstalledPlugins([]));
   }, [workflow.owner?.ownerType, workflow.owner?.ownerId]);
   useEffect(()=>{
     if(!collaborationHandle)return;
@@ -550,8 +556,9 @@ export function WorkflowEditor() {
         rememberCollaborationSession({handle:collaborationHandle,appliedSequence:sequence,clientSequence:collaborationClientSequence.current});
         if(next!==workflowRef.current){
           if(receivedRemoteOperation){past.current=[];future.current=[]}
-          workflowRef.current=next;
-          setWorkflow(next);
+          const repaired = repairWorkflowTriggerReference(next);
+          workflowRef.current=repaired;
+          setWorkflow(repaired);
           if(receivedRemoteOperation)setAnnouncement("Encrypted changes from another editor were applied. Local undo history was reset.");
         }
         if(page.latestSequence<sequence)throw new Error("The collaboration service returned a stale sequence.");
@@ -605,7 +612,7 @@ export function WorkflowEditor() {
       collaborationClientSequence.current=1;
       await api.appendWorkflowCollaborationOperation(handle,snapshot,1);
       collaborationAppliedSequence.current=0;
-      localStorage.setItem(collaborationWorkspaceStorageKey,workspaceId);
+      try{localStorage.setItem(collaborationWorkspaceStorageKey,workspaceId)}catch{/* collaboration remains active for this session */}
       rememberCollaborationSession({handle,appliedSequence:0,clientSequence:1});
       setCollaborationHandle(handle);setCollaborators([]);setCollaborationOpen(false);
       toast.push("Secure live canvas started. Share the invite code when you are ready.","success");
@@ -799,7 +806,8 @@ export function WorkflowEditor() {
     }
   }, [doSave, test, workflow.id]);
   const clearRecoveryContext = useCallback(() => {
-    localStorage.removeItem("sandbox.editor.recovery-context.v1");
+    try { localStorage.removeItem("sandbox.editor.recovery-context.v1"); }
+    catch { /* recovery cleanup must not block the editor */ }
     setRecoveryContext(undefined);
   }, []);
   const retryRecoveryStep = useCallback(async () => {
@@ -1552,12 +1560,7 @@ export function WorkflowEditor() {
             edges={flowEdges}
             nodeTypes={nodeTypes}
             onInit={setInstance}
-            onMoveEnd={(_, viewport) =>
-              localStorage.setItem(
-                `sandbox.workflow-viewport.v1.${workflow.id}`,
-                JSON.stringify(viewport),
-              )
-            }
+            onMoveEnd={(_, viewport) => { try { localStorage.setItem(`sandbox.workflow-viewport.v1.${workflow.id}`, JSON.stringify(viewport)); } catch { /* viewport persistence is optional */ } }}
             onNodesChange={onNodesChange}
             onNodeClick={(_, node) => setSelectedNodeId(node.id)}
             onPaneClick={() => setSelectedNodeId(undefined)}
@@ -1850,7 +1853,7 @@ export function WorkflowEditor() {
         participants={collaborators}
         busy={collaborationBusy}
         error={collaborationError}
-        defaultWorkspaceId={localStorage.getItem(collaborationWorkspaceStorageKey)??""}
+        defaultWorkspaceId={readCollaborationWorkspace()}
         onStart={workspaceId=>void startCollaboration(workspaceId)}
         onJoin={inviteCode=>void joinCollaboration(inviteCode)}
         onLeave={()=>void leaveCollaboration()}
@@ -1880,7 +1883,7 @@ export function WorkflowEditor() {
         onOpenChange={(open) => { if (!open) setDraftPrompt(undefined); }}
         title="Restore recovery draft?"
         description={draftPrompt && draftUsesEarlierBase(draftPrompt, activeWorkflow!) ? "This draft was made against an earlier saved version. Restoring it replaces only the in-memory editor state; it is not saved until you explicitly Save." : "Restoring replaces only the in-memory editor state; it is not saved until you explicitly Save."}
-        footer={<><button className="button" onClick={() => { if (draftPrompt) clearWorkflowDraft(draftPrompt.workflowId); setDraftPrompt(undefined); }}>Discard draft</button><button className="button primary" onClick={() => { if (!draftPrompt) return; setWorkflow(structuredClone(draftPrompt.workflow)); setDraftPrompt(undefined); }}>Restore draft</button></>}
+        footer={<><button className="button" onClick={() => { if (draftPrompt) clearWorkflowDraft(draftPrompt.workflowId); setDraftPrompt(undefined); }}>Discard draft</button><button className="button primary" onClick={() => { if (!draftPrompt) return; setWorkflow(repairWorkflowTriggerReference(structuredClone(draftPrompt.workflow))); setDraftPrompt(undefined); }}>Restore draft</button></>}
       >
         <p>This recovery draft is stored only on this device. Choosing Restore keeps it until a successful explicit Save.</p>
       </Dialog>

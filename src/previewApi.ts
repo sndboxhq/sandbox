@@ -15,6 +15,7 @@ import type {
   WorkflowRevisionSummary,
   WorkflowSummary,
 } from "./types";
+import { isRecord, readStoredJson, writeStoredJson } from "./safeStorage";
 import { createAdditionalTemplateWorkflow } from "./workflowTemplates";
 
 const KEY = "sandbox-preview-workflows";
@@ -651,31 +652,28 @@ const blank = (template = "blank"): Workflow => {
     edges: [],
   };
 };
+const storedWorkflow = (value: unknown): value is Workflow => isRecord(value)
+  && typeof value.id === "string" && typeof value.name === "string"
+  && Array.isArray(value.nodes) && Array.isArray(value.edges)
+  && isRecord(value.settings) && isRecord(value.settings.permissions);
 const workflows = (): Workflow[] =>
-  (JSON.parse(localStorage.getItem(KEY) ?? "[]") as Workflow[]).map(workflow=>({...workflow,schemaVersion:6,settings:{...workflow.settings,expressionLanguageVersion:workflow.settings.expressionLanguageVersion??1,collectionLimits:workflow.settings.collectionLimits??defaultCollectionLimits(),permissions:{...workflow.settings.permissions,approvedEnvironmentVariables:workflow.settings.permissions.approvedEnvironmentVariables??[]}}} as Workflow));
-const saveAll = (v: Workflow[]) => localStorage.setItem(KEY, JSON.stringify(v));
-const runs = () =>
-  JSON.parse(localStorage.getItem(RUNS) ?? "[]") as ExecutionRecord[];
-const saveRuns = (v: ExecutionRecord[]) =>
-  localStorage.setItem(RUNS, JSON.stringify(v));
-const metadata = () =>
-  JSON.parse(localStorage.getItem(META) ?? "{}") as Record<
-    string,
-    WorkflowMetadata
-  >;
-const saveMetadata = (value: Record<string, WorkflowMetadata>) =>
-  localStorage.setItem(META, JSON.stringify(value));
+  readStoredJson<unknown[]>(KEY, [], Array.isArray).filter(storedWorkflow).map(workflow=>({...workflow,schemaVersion:6,settings:{...workflow.settings,expressionLanguageVersion:workflow.settings.expressionLanguageVersion??1,collectionLimits:workflow.settings.collectionLimits??defaultCollectionLimits(),permissions:{...workflow.settings.permissions,approvedEnvironmentVariables:workflow.settings.permissions.approvedEnvironmentVariables??[]}}} as Workflow));
+const saveAll = (value: Workflow[]) => writeStoredJson(KEY, value);
+const runs = () => readStoredJson<unknown[]>(RUNS, [], Array.isArray)
+  .filter((value): value is ExecutionRecord => isRecord(value) && typeof value.id === "string" && typeof value.workflowId === "string");
+const saveRuns = (value: ExecutionRecord[]) => writeStoredJson(RUNS, value);
+const metadata = () => readStoredJson<Record<string, unknown>>(META, {}, isRecord) as Record<string, WorkflowMetadata>;
+const saveMetadata = (value: Record<string, WorkflowMetadata>) => writeStoredJson(META, value);
 interface PreviewRevision {
   summary: WorkflowRevisionSummary;
   workflow: Workflow;
 }
-const revisions = () =>
-  JSON.parse(localStorage.getItem(REVISIONS) ?? "{}") as Record<
-    string,
-    PreviewRevision[]
-  >;
-const saveRevisions = (value: Record<string, PreviewRevision[]>) =>
-  localStorage.setItem(REVISIONS, JSON.stringify(value));
+const revisions = () => Object.fromEntries(
+  Object.entries(readStoredJson<Record<string, unknown>>(REVISIONS, {}, isRecord))
+    .filter(([, value]) => Array.isArray(value))
+    .map(([key, value]) => [key, (value as unknown[]).filter((item): item is PreviewRevision => isRecord(item) && isRecord(item.summary) && isRecord(item.workflow))]),
+) as Record<string, PreviewRevision[]>;
+const saveRevisions = (value: Record<string, PreviewRevision[]>) => writeStoredJson(REVISIONS, value);
 const previewHash = (workflow: Workflow) => {
   const copy: Partial<Workflow> = structuredClone(workflow);
   delete copy.updatedAt;
@@ -1158,21 +1156,25 @@ export const previewApi = {
         workflow.nodes.some((node) => node.type === "schedule_trigger"),
     );
     return {
-      paused: localStorage.getItem(RUNNER) === "true",
+      paused: readStoredJson(RUNNER, false, (value): value is boolean => typeof value === "boolean"),
       activeWorkflowIds: [],
       localSchedulesStopOnQuit: true,
       scheduledWorkflowCount: scheduled.length,
+      scheduledWorkflows: scheduled.map((workflow) => ({
+        workflowId: workflow.id,
+        name: workflow.name,
+        ready: workflow.settings.permissions.backgroundExecutionPermitted,
+      })),
     };
   },
   async setRunnerPaused(paused: boolean) {
-    localStorage.setItem(RUNNER, String(paused));
+    writeStoredJson(RUNNER, paused);
     window.dispatchEvent(new CustomEvent("runner-status-changed"));
     return this.runnerStatus();
   },
   async listBrowserProfiles() {
-    const stored = JSON.parse(
-      localStorage.getItem(PROFILES) ?? "[]",
-    ) as Partial<BrowserProfile>[];
+    const stored = readStoredJson<unknown[]>(PROFILES, [], Array.isArray)
+      .filter(isRecord) as Partial<BrowserProfile>[];
     return stored
       .filter((profile) => profile.id && profile.name)
       .map(
@@ -1211,7 +1213,7 @@ export const previewApi = {
       createdAt: now(),
     };
     const profiles = await this.listBrowserProfiles();
-    localStorage.setItem(PROFILES, JSON.stringify([...profiles, profile]));
+    writeStoredJson(PROFILES, [...profiles, profile]);
     return profile;
   },
   async updateBrowserProfile(
@@ -1221,15 +1223,17 @@ export const previewApi = {
     settings: BrowserProfileSettings,
   ) {
     const profiles = await this.listBrowserProfiles();
-    const profile = profiles.find((item) => item.id === id)!;
+    const profile = profiles.find((item) => item.id === id);
+    if (!profile) throw new Error("That browser profile no longer exists. Refresh and try again.");
     Object.assign(profile, { name, persistent, settings });
-    localStorage.setItem(PROFILES, JSON.stringify(profiles));
+    writeStoredJson(PROFILES, profiles);
     return profile;
   },
   async duplicateBrowserProfile(id: string) {
     const source = (await this.listBrowserProfiles()).find(
       (item) => item.id === id,
-    )!;
+    );
+    if (!source) throw new Error("That browser profile no longer exists. Refresh and try again.");
     return this.createBrowserProfile(
       `${source.name} copy`,
       source.persistent,
@@ -1237,17 +1241,11 @@ export const previewApi = {
     );
   },
   async deleteBrowserProfile(id: string) {
-    localStorage.setItem(
-      PROFILES,
-      JSON.stringify(
-        (await this.listBrowserProfiles()).filter((item) => item.id !== id),
-      ),
-    );
+    writeStoredJson(PROFILES, (await this.listBrowserProfiles()).filter((item) => item.id !== id));
   },
   async listConnections() {
-    return JSON.parse(
-      localStorage.getItem(CONNECTIONS) ?? "[]",
-    ) as ConnectionMetadata[];
+    return readStoredJson<unknown[]>(CONNECTIONS, [], Array.isArray)
+      .filter((value): value is ConnectionMetadata => isRecord(value) && typeof value.id === "string" && typeof value.provider === "string");
   },
   async submitBugReport(report: BugReportDraft): Promise<BugReportReceipt> {
     if (!report.summary.trim() || !report.description.trim())

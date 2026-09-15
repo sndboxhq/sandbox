@@ -96,7 +96,7 @@ export function NodeInspector({
     onChange({ ...node, configuration: { ...config, [key]: value } });
   useEffect(() => {
     if (definition.group === "Browser")
-      void api.listBrowserProfiles().then(setProfiles);
+      void api.listBrowserProfiles().then(setProfiles).catch(() => setProfiles([]));
   }, [definition.group]);
   useEffect(() => {
     if (
@@ -105,7 +105,7 @@ export function NodeInspector({
       node.type === "ai_prompt" ||
       Boolean(node.plugin)
     )
-      void api.listConnections().then(setConnections);
+      void api.listConnections().then(setConnections).catch(() => setConnections([]));
   }, [definition.group, node.type, node.plugin]);
   useEffect(() => {
     const controls = document.querySelectorAll<HTMLElement>(

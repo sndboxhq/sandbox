@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { issueFingerprint, type IssueLike, type IssueTrackingRecord } from "./issues";
+import { isRecord, readStoredJson } from "./safeStorage";
 
 const STORAGE_PREFIX = "sndbox.issue-tracking.v1";
 
@@ -53,11 +54,21 @@ export function useIssueTracking(scopeId: string, issues: IssueLike[]) {
 }
 
 function load(scopeId: string): Record<string, IssueTrackingRecord> {
-  try {
-    return JSON.parse(window.localStorage.getItem(`${STORAGE_PREFIX}.${scopeId}`) ?? "{}");
-  } catch {
-    return {};
-  }
+  const stored = readStoredJson<Record<string, unknown>>(
+    `${STORAGE_PREFIX}.${scopeId}`,
+    {},
+    isRecord,
+  );
+  return Object.fromEntries(Object.entries(stored).filter(
+    (entry): entry is [string, IssueTrackingRecord] => {
+      const record = entry[1];
+      return isRecord(record)
+        && typeof record.firstSeen === "string"
+        && typeof record.lastSeen === "string"
+        && typeof record.occurrences === "number"
+        && (record.resolvedAt === undefined || typeof record.resolvedAt === "string");
+    },
+  ));
 }
 
 function save(scopeId: string, records: Record<string, IssueTrackingRecord>) {

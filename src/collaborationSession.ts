@@ -11,9 +11,10 @@ const deviceStorageKey="sandbox.collaboration.device.v1";
 const colors=["#6f8fff", "#c77dff", "#33b895", "#ef8c5a", "#e35d8f", "#4da3d9"];
 
 export function collaborationDeviceIdentity(){
-  const stored=localStorage.getItem(deviceStorageKey);
+  let stored:string|null=null;
+  try{stored=localStorage.getItem(deviceStorageKey)}catch{/* an in-memory identity still permits this session */}
   if(stored&&/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(stored))return stored;
-  const created=crypto.randomUUID();localStorage.setItem(deviceStorageKey,created);return created;
+  const created=crypto.randomUUID();try{localStorage.setItem(deviceStorageKey,created)}catch{/* use it for this session only */}return created;
 }
 
 export function collaborationDeviceColor(deviceId:string){

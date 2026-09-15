@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { MockHost } from "./mock-host.js";
 import { inspectPackage, packDirectory, signDirectory } from "./package.js";
 import { scaffold } from "./scaffold.js";
+import { createScaffoldFiles } from "./scaffold-files.js";
 import { permissionDiff, validateManifest } from "./validation.js";
 
 async function project() {
@@ -17,6 +18,13 @@ async function project() {
 }
 
 describe("plugin SDK", () => {
+  it("uses the same configurable starter files in every host", () => {
+    const files = createScaffoldFiles({ pluginId: "uk.sndbox.weather", publisherId: "uk.sndbox", name: "Weather", description: "Local forecasts", nodeType: "weather.lookup", nodeName: "Look up weather" });
+    const manifest = JSON.parse(files.find(file => file.path === "manifest.json")!.contents);
+    expect(files.map(file => file.path)).toContain("guest/src/lib.rs");
+    expect(manifest).toMatchObject({ minimumHostVersion: ">=0.8.0", description: "Local forecasts", nodes: [{ nodeType: "weather.lookup", displayName: "Look up weather" }] });
+  });
+
   it("scaffolds and reproducibly packages a project", async () => {
     const root = await project();
     const one = path.join(root, "dist", "one.zip");

@@ -20,6 +20,22 @@ const TRIGGERS: &[&str] = &[
     "github.workflow_run_completed",
 ];
 
+/// Repairs a stale trigger ID only when the graph has one unambiguous trigger.
+pub fn repair_trigger_reference(workflow: &mut Workflow) -> bool {
+    let mut triggers = workflow
+        .nodes
+        .iter()
+        .filter(|node| TRIGGERS.contains(&node.node_type.as_str()));
+    let Some(trigger) = triggers.next() else {
+        return false;
+    };
+    if triggers.next().is_some() || workflow.trigger_node_id == trigger.id {
+        return false;
+    }
+    workflow.trigger_node_id = trigger.id.clone();
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidationIssue {
@@ -1807,6 +1823,16 @@ mod tests {
     #[test]
     fn detects_cycles() {
         assert!(topological_order(&workflow(vec![("a", "b"), ("b", "c"), ("c", "a")])).is_err());
+    }
+    #[test]
+    fn repairs_an_unambiguous_stale_trigger_reference() {
+        let mut value = workflow(vec![("a", "b")]);
+        value.trigger_node_id = "deleted-trigger".into();
+        assert!(repair_trigger_reference(&mut value));
+        assert_eq!(value.trigger_node_id, "a");
+        assert!(!validate(&value)
+            .iter()
+            .any(|issue| issue.code == "trigger_mismatch"));
     }
     #[test]
     fn reports_disconnected_node() {

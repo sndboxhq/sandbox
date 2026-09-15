@@ -33,7 +33,7 @@ export function ApprovalRequest({
   const [workflow, setWorkflow] = useState<Workflow>();
   const approveButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    void api.getWorkflow(item.workflowId).then((value) => setWorkflow(value));
+    void api.getWorkflow(item.workflowId).then((value) => setWorkflow(value)).catch(() => setWorkflow(undefined));
   }, [item.workflowId]);
   useEffect(() => {
     if (modal) approveButton.current?.focus();

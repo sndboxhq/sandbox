@@ -76,7 +76,8 @@ export interface DesktopIntegrationSettings { shortcut:string; shortcutEnabled:b
 export interface WorkflowImportInspection { inspectionId:string; sourcePath:string; name:string; description:string; sourceSchemaVersion:number; nodeCount:number; requiredNodeTypes:string[]; warnings:string[] }
 export interface ExecutionQuery { search?:string; workflowIds?:string[]; statuses?:ExecutionStatus[]; triggerTypes?:string[]; startedAfter?:string; startedBefore?:string; cursor?:string; limit?:number }
 export interface ExecutionPage { items:ExecutionRecord[]; nextCursor?:string }
-export interface RunnerStatus { paused:boolean; activeWorkflowIds:string[]; localSchedulesStopOnQuit:boolean; scheduledWorkflowCount:number; nextRunAt?:string }
+export interface RunnerScheduledWorkflow { workflowId:string; name:string; nextRunAt?:string; ready:boolean }
+export interface RunnerStatus { paused:boolean; activeWorkflowIds:string[]; localSchedulesStopOnQuit:boolean; scheduledWorkflowCount:number; scheduledWorkflows:RunnerScheduledWorkflow[]; nextRunAt?:string }
 export interface AccountMetadata { accountId:string; email:string; displayName:string; sessionId:string; expiresAt:string; signedInAt:string }
 export interface AccountStatus { configured:boolean; signedIn:boolean; metadata?:AccountMetadata; localWorkflowsAvailable:boolean; configurationError?:string }
 export type BuiltInRole="owner"|"administrator"|"developer"|"operator"|"viewer";
