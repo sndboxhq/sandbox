@@ -1,6 +1,6 @@
 use crate::{schema::validate_declared_schema, PluginError, MANIFEST_VERSION};
 use regex::Regex;
-use semver::{BuildMetadata, Prerelease, Version, VersionReq};
+use semver::{Comparator, Op, Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -736,20 +736,97 @@ fn matches_host_version(requirement: &VersionReq, host_version: &Version) -> boo
     if requirement.matches(host_version) {
         return true;
     }
-    if host_version.pre.is_empty()
-        || requirement.comparators.iter().any(|comparator| {
-            !comparator.pre.is_empty()
-                && comparator.major == host_version.major
-                && comparator.minor == Some(host_version.minor)
-                && comparator.patch == Some(host_version.patch)
-        })
-    {
+    if host_version.pre.is_empty() {
         return false;
     }
-    let mut compatibility_base = host_version.clone();
-    compatibility_base.pre = Prerelease::EMPTY;
-    compatibility_base.build = BuildMetadata::EMPTY;
-    requirement.matches(&compatibility_base)
+    // semver deliberately excludes prereleases unless a comparator names a
+    // prerelease with the same core version. Plugin compatibility instead treats
+    // a beta host according to ordinary precedence while retaining explicit beta
+    // bounds, so stable ranges such as >=0.3.0,<0.8.0 include 0.8.0-beta.1.
+    requirement
+        .comparators
+        .iter()
+        .all(|comparator| matches_prerelease_comparator(comparator, host_version))
+}
+
+fn matches_prerelease_comparator(comparator: &Comparator, version: &Version) -> bool {
+    match comparator.op {
+        Op::Exact | Op::Wildcard => {
+            version.major == comparator.major
+                && comparator.minor.is_none_or(|minor| version.minor == minor)
+                && comparator.patch.is_none_or(|patch| version.patch == patch)
+                && version.pre == comparator.pre
+        }
+        Op::Greater | Op::GreaterEq => {
+            let exact = version.major == comparator.major
+                && comparator.minor.is_none_or(|minor| version.minor == minor)
+                && comparator.patch.is_none_or(|patch| version.patch == patch)
+                && version.pre == comparator.pre;
+            exact || version.major > comparator.major
+                || version.major == comparator.major
+                    && comparator.minor.is_some_and(|minor| version.minor > minor)
+                || version.major == comparator.major
+                    && comparator.minor == Some(version.minor)
+                    && comparator.patch.is_some_and(|patch| version.patch > patch)
+                || version.major == comparator.major
+                    && comparator.minor == Some(version.minor)
+                    && comparator.patch == Some(version.patch)
+                    && version.pre > comparator.pre
+                && comparator.op == Op::Greater
+        }
+        Op::Less | Op::LessEq => {
+            let exact = version.major == comparator.major
+                && comparator.minor.is_none_or(|minor| version.minor == minor)
+                && comparator.patch.is_none_or(|patch| version.patch == patch)
+                && version.pre == comparator.pre;
+            exact && comparator.op == Op::LessEq
+                || version.major < comparator.major
+                || version.major == comparator.major
+                    && comparator.minor.is_some_and(|minor| version.minor < minor)
+                || version.major == comparator.major
+                    && comparator.minor == Some(version.minor)
+                    && comparator.patch.is_some_and(|patch| version.patch < patch)
+                || version.major == comparator.major
+                    && comparator.minor == Some(version.minor)
+                    && comparator.patch == Some(version.patch)
+                    && version.pre < comparator.pre
+        }
+        Op::Tilde => {
+            version.major == comparator.major
+                && comparator.minor.is_none_or(|minor| version.minor == minor)
+                && comparator.patch.is_none_or(|patch| version.patch >= patch)
+                && (comparator.patch != Some(version.patch) || version.pre >= comparator.pre)
+        }
+        Op::Caret => {
+            if version.major != comparator.major {
+                return false;
+            }
+            let Some(minor) = comparator.minor else {
+                return true;
+            };
+            let Some(patch) = comparator.patch else {
+                return if comparator.major > 0 {
+                    version.minor >= minor
+                } else {
+                    version.minor == minor
+                };
+            };
+            if comparator.major > 0 {
+                version.minor > minor
+                    || version.minor == minor
+                        && (version.patch > patch
+                            || version.patch == patch && version.pre >= comparator.pre)
+            } else if minor > 0 {
+                version.minor == minor
+                    && (version.patch > patch
+                        || version.patch == patch && version.pre >= comparator.pre)
+            } else {
+                version.minor == minor
+                    && version.patch == patch
+                    && version.pre >= comparator.pre
+            }
+        }
+    }
 }
 
 #[cfg(test)]
