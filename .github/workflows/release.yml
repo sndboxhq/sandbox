@@ -64,6 +64,7 @@ jobs:
       SANDBOX_ACCOUNT_AUDIENCE: ${{ vars.SANDBOX_ACCOUNT_AUDIENCE }}
       SANDBOX_ACCOUNT_CLIENT_ID: ${{ vars.SANDBOX_NATIVE_CLIENT_ID }}
       SANDBOX_CONTROL_PLANE_URL: ${{ vars.SANDBOX_CONTROL_PLANE_URL }}
+      PUPPETEER_SKIP_DOWNLOAD: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

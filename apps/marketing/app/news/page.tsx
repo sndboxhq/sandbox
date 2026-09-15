@@ -105,7 +105,7 @@ export default function NewsPage() {
           </figure>
         </Link>
         <div className={styles.leadCopy}>
-          <p className={styles.storyType}>Desktop beta · v0.8.0-beta.1</p>
+          <p className={styles.storyType}>Desktop beta · v8.0.0-beta.1</p>
           <h2 id="lead-story-title">sndbox 8 is taking shape.</h2>
           <p>
             This power-user preview brings the command surface, custom functions,

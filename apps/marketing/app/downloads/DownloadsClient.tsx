@@ -47,7 +47,7 @@ export function DownloadsClient({ manifest }: { manifest?: ReleaseManifest }) {
   const artifact = findArtifact(manifest, selected);
   const linuxRunner = selected === "linux-x64" || selected === "linux-arm64";
   const unsignedWindowsBeta = selected === "windows" && manifest?.channel === "beta";
-  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "v0.8.0-beta.1";
+  const releaseLabel = manifest ? `v${manifest.version.replace(/^v/, "")}` : "v8.0.0-beta.1";
 
   async function copyChecksum() {
     if (!artifact) return;

@@ -60,7 +60,7 @@ export const useCases = [
 ];
 
 export const launchRelease = {
-  version: "0.8.0-beta.1",
+  version: "8.0.0-beta.1",
   date: "In development",
   channel: "Beta",
   title: "The power-user release.",
