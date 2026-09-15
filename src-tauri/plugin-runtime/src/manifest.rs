@@ -755,13 +755,13 @@ fn matches_prerelease_comparator(comparator: &Comparator, version: &Version) -> 
             version.major == comparator.major
                 && comparator.minor.is_none_or(|minor| version.minor == minor)
                 && comparator.patch.is_none_or(|patch| version.patch == patch)
-                && version.pre == comparator.pre
+                && (comparator.pre.is_empty() || version.pre == comparator.pre)
         }
         Op::Greater | Op::GreaterEq => {
             let exact = version.major == comparator.major
                 && comparator.minor.is_none_or(|minor| version.minor == minor)
                 && comparator.patch.is_none_or(|patch| version.patch == patch)
-                && version.pre == comparator.pre;
+                && (comparator.pre.is_empty() || version.pre == comparator.pre);
             let greater = version.major > comparator.major
                 || version.major == comparator.major
                     && comparator.minor.is_some_and(|minor| version.minor > minor)
@@ -778,7 +778,7 @@ fn matches_prerelease_comparator(comparator: &Comparator, version: &Version) -> 
             let exact = version.major == comparator.major
                 && comparator.minor.is_none_or(|minor| version.minor == minor)
                 && comparator.patch.is_none_or(|patch| version.patch == patch)
-                && version.pre == comparator.pre;
+                && (comparator.pre.is_empty() || version.pre == comparator.pre);
             exact && comparator.op == Op::LessEq
                 || version.major < comparator.major
                 || version.major == comparator.major
@@ -795,7 +795,9 @@ fn matches_prerelease_comparator(comparator: &Comparator, version: &Version) -> 
             version.major == comparator.major
                 && comparator.minor.is_none_or(|minor| version.minor == minor)
                 && comparator.patch.is_none_or(|patch| version.patch >= patch)
-                && (comparator.patch != Some(version.patch) || version.pre >= comparator.pre)
+                && (comparator.pre.is_empty()
+                    || comparator.patch != Some(version.patch)
+                    || version.pre >= comparator.pre)
         }
         Op::Caret => {
             if version.major != comparator.major {
@@ -815,15 +817,20 @@ fn matches_prerelease_comparator(comparator: &Comparator, version: &Version) -> 
                 version.minor > minor
                     || version.minor == minor
                         && (version.patch > patch
-                            || version.patch == patch && version.pre >= comparator.pre)
+                            || version.patch == patch
+                                && (comparator.pre.is_empty() || version.pre >= comparator.pre))
             } else if minor > 0 {
                 version.minor == minor
                     && (version.patch > patch
-                        || version.patch == patch && version.pre >= comparator.pre)
+                        || version.patch == patch
+                            && (comparator.pre.is_empty() || version.pre >= comparator.pre))
             } else {
-                version.minor == minor && version.patch == patch && version.pre >= comparator.pre
+                version.minor == minor
+                    && version.patch == patch
+                    && (comparator.pre.is_empty() || version.pre >= comparator.pre)
             }
         }
+        _ => false,
     }
 }
 
@@ -936,6 +943,14 @@ pub(crate) mod tests {
         assert!(
             !manifest
                 .validate(&Version::parse("0.7.2-beta.3").unwrap(), true)
+                .valid
+        );
+
+        manifest.minimum_host_version = VersionReq::parse("^0.8.0").unwrap();
+        manifest.maximum_host_version = None;
+        assert!(
+            manifest
+                .validate(&Version::parse("0.8.0-beta.1").unwrap(), true)
                 .valid
         );
 
