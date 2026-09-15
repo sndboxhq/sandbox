@@ -74,6 +74,6 @@ jobs:
           # Unit tests do not package the generated Node/Chromium sidecar. The release
           # workflow prepares and validates those resources before `tauri build`.
           TAURI_CONFIG: '{"bundle":{"resources":[]}}'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --workspace --no-fail-fast
-      - run: cargo test --manifest-path services/hosted-runner/Cargo.toml --no-fail-fast
-      - run: cargo test --manifest-path agents/server/Cargo.toml --no-fail-fast
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --workspace --no-fail-fast
+      - run: cargo test --locked --manifest-path services/hosted-runner/Cargo.toml --no-fail-fast
+      - run: cargo test --locked --manifest-path agents/server/Cargo.toml --no-fail-fast

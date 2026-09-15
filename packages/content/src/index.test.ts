@@ -52,7 +52,7 @@ describe("v0.6 public content", () => {
   });
 
   it("publishes substantive sndbox 8 release notes without claiming an artifact", () => {
-    expect(launchRelease.version).toBe("0.8.0-beta.1");
+    expect(launchRelease.version).toBe("0.8.0-beta.2");
     expect(launchRelease.sections.length).toBeGreaterThanOrEqual(6);
     expect(launchRelease.sections.flatMap((section) => section.items).length).toBeGreaterThanOrEqual(20);
     expect(launchRelease.compatibility).toContain(

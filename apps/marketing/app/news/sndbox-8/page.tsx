@@ -46,7 +46,7 @@ export default function SndboxEightNewsPage() {
             sizes="(max-width: 1360px) 100vw, 1312px"
             priority
           />
-          <figcaption>The current desktop work is collected in v0.8.0-beta.1.</figcaption>
+          <figcaption>The current desktop work is collected in v0.8.0-beta.2.</figcaption>
         </figure>
 
         <div className={styles.articleLayout}>
@@ -135,7 +135,7 @@ export default function SndboxEightNewsPage() {
               <p className={styles.sectionNumber}>05 · Release state</p>
               <h2>Beta still means beta.</h2>
               <p>
-                The repository identifies this work as v0.8.0-beta.1, but the
+                The repository identifies this work as v0.8.0-beta.2, but the
                 current source state does not attach a public download artifact.
                 The changelog and downloads page report that distinction directly.
               </p>

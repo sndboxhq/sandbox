@@ -742,7 +742,7 @@ fn matches_host_version(requirement: &VersionReq, host_version: &Version) -> boo
     // semver deliberately excludes prereleases unless a comparator names a
     // prerelease with the same core version. Plugin compatibility instead treats
     // a beta host according to ordinary precedence while retaining explicit beta
-    // bounds, so stable ranges such as >=0.3.0,<0.8.0 include 0.8.0-beta.1.
+    // bounds, so stable ranges such as >=0.3.0,<0.8.0 include 0.8.0-beta.2.
     requirement
         .comparators
         .iter()
@@ -936,7 +936,7 @@ pub(crate) mod tests {
         );
         assert!(
             manifest
-                .validate(&Version::parse("0.8.0-beta.1").unwrap(), true)
+                .validate(&Version::parse("0.8.0-beta.2").unwrap(), true)
                 .valid
         );
 
@@ -950,7 +950,7 @@ pub(crate) mod tests {
         manifest.maximum_host_version = None;
         assert!(
             manifest
-                .validate(&Version::parse("0.8.0-beta.1").unwrap(), true)
+                .validate(&Version::parse("0.8.0-beta.2").unwrap(), true)
                 .valid
         );
 
