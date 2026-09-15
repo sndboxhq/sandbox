@@ -55,7 +55,7 @@ export class PostgresCredentialExpiryNotifier {
         sent++;
       }catch(error){
         const message=(error instanceof Error?error.message:"Unknown email delivery failure").slice(0,500);
-        await this.databaseQuery(`UPDATE credential_expiry_notifications SET status='failed',claimed_at=NULL,last_error=$2,next_attempt_at=$3+(LEAST(attempts,24)||' hours')::interval WHERE id=$1 AND status='delivering'`,[delivery.id,message,now]);
+        await this.databaseQuery(`UPDATE credential_expiry_notifications SET status='failed',claimed_at=NULL,last_error=$2,next_attempt_at=$3::timestamptz+(LEAST(attempts,24)||' hours')::interval WHERE id=$1 AND status='delivering'`,[delivery.id,message,now]);
         failed++;
       }
     }

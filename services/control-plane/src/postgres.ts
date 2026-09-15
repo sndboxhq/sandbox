@@ -571,7 +571,7 @@ export class PostgresRepository implements ControlPlaneRepository {
       const inserted = await client.query<{ paired_at: Date }>(
         `INSERT INTO runners(id,account_id,workspace_id,display_name,operating_system,architecture,application_version,protocol_version,plugin_runtime_version,capabilities,safe_folder_labels,browser_engine,installed_plugin_versions,tags,status)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'offline') RETURNING paired_at`,
-        [runnerId, actor.accountId, input.workspaceId, input.displayName, metadata.operatingSystem, metadata.architecture, metadata.applicationVersion, metadata.protocolVersion, metadata.pluginRuntimeVersion, metadata.capabilities, metadata.safeFolderLabels, metadata.browserEngine, metadata.installedPluginVersions, metadata.tags]
+        [runnerId, actor.accountId, input.workspaceId, input.displayName, metadata.operatingSystem, metadata.architecture, metadata.applicationVersion, metadata.protocolVersion, metadata.pluginRuntimeVersion, JSON.stringify(metadata.capabilities), JSON.stringify(metadata.safeFolderLabels), metadata.browserEngine === null ? null : JSON.stringify(metadata.browserEngine), JSON.stringify(metadata.installedPluginVersions), metadata.tags]
       );
       await client.query(`INSERT INTO runner_device_keys(runner_id,key_id,algorithm,public_key) VALUES($1,$2,'ed25519',$3)`, [runnerId, keyId, result.rows[0].device_public_key]);
       await client.query(`UPDATE runner_pairing_challenges SET consumed_at=now() WHERE id=$1`, [input.challengeId]);
