@@ -1,0 +1,99 @@
+---
+title: "Text Template"
+description: "Render text with safe workflow expressions. Exact configuration, ports, placement, and execution behavior."
+icon: "braces"
+---
+
+**Node type:** `text_template` · **Version:** `1` · **Category:** Data
+
+Render text with safe workflow expressions. This node is not marked with the catalogue's generic side-effect flag. That classification is not a guarantee that every configured operation is read-only; review the concrete action and its destination.
+
+## When to use this node
+
+- Build a readable message from structured workflow data.
+- Create small text bodies without granting a code runtime.
+
+## Example: Create a greeting
+
+Render a name from the connected input object.
+
+
+```json title="Example settings"
+{
+  "values": null,
+  "template": "Hello {{input.name}}"
+}
+```
+
+This shows the important settings, not a complete exported node.
+
+
+1. Connect or configure the template data.
+2. Insert safe workflow expressions in the text.
+3. Test missing values and multiline output before sending it externally.
+
+
+## Configuration
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `values` | any | `null` | Optional explicit data made available to the template. |
+| `template` | string | `"Hello {{input.name}}"` | Text rendered with the safe workflow expression resolver. |
+
+
+
+## Workflow JSON
+
+The editor stores this node with the following implemented default configuration:
+
+```json title="Default node configuration"
+{
+  "type": "text_template",
+  "version": 1,
+  "configuration": {
+    "values": null,
+    "template": "Hello {{input.name}}"
+  }
+}
+```
+
+Values may be entered literally or mapped from an earlier compatible output when the inspector exposes a mapping control. See [Variables and data mapping](/workflows/variables-and-data).
+
+## Inputs
+
+| Port | Type | Required | Description |
+| --- | --- | --- | --- |
+| `input` | `any` | No | Template data |
+
+## Outputs
+
+| Port | Type | Required | Description |
+| --- | --- | --- | --- |
+| `text` | `string` | No | Rendered text |
+
+## Execution behavior
+
+- Expressions use the same restricted resolver as other mapped workflow fields.
+- Rendering produces text only and has no filesystem, network, or process access.
+- The editor catalogue declares `text` (string) for mapping. The execution inspector can contain additional evidence fields; inspect a real result before selecting nested paths from object or any outputs.
+
+## Common issues
+
+- Use the input root for connected data and verify the field path in test output.
+- Treat rendered secrets as sensitive because later logs or messages can expose them.
+
+
+## Where it can run
+
+- Desktop local runner
+- Paired self-hosted runner
+- Hosted runner
+
+## Test and inspect
+
+Use **Test node** in the editor to preview this step with the current configuration. A full run records resolved inputs, outputs, logs, duration, and any artifacts in the execution inspector. Side-effecting or destructive nodes can require an additional confirmation or approved workflow permission.
+
+## Related guides
+
+- [Expressions](/workflows/expressions)
+- [Variables and data mapping](/workflows/variables-and-data)
