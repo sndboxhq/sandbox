@@ -762,7 +762,7 @@ fn matches_prerelease_comparator(comparator: &Comparator, version: &Version) -> 
                 && comparator.minor.is_none_or(|minor| version.minor == minor)
                 && comparator.patch.is_none_or(|patch| version.patch == patch)
                 && version.pre == comparator.pre;
-            exact || version.major > comparator.major
+            let greater = version.major > comparator.major
                 || version.major == comparator.major
                     && comparator.minor.is_some_and(|minor| version.minor > minor)
                 || version.major == comparator.major
@@ -771,8 +771,8 @@ fn matches_prerelease_comparator(comparator: &Comparator, version: &Version) -> 
                 || version.major == comparator.major
                     && comparator.minor == Some(version.minor)
                     && comparator.patch == Some(version.patch)
-                    && version.pre > comparator.pre
-                && comparator.op == Op::Greater
+                    && version.pre > comparator.pre;
+            greater || exact && comparator.op == Op::GreaterEq
         }
         Op::Less | Op::LessEq => {
             let exact = version.major == comparator.major
@@ -821,9 +821,7 @@ fn matches_prerelease_comparator(comparator: &Comparator, version: &Version) -> 
                     && (version.patch > patch
                         || version.patch == patch && version.pre >= comparator.pre)
             } else {
-                version.minor == minor
-                    && version.patch == patch
-                    && version.pre >= comparator.pre
+                version.minor == minor && version.patch == patch && version.pre >= comparator.pre
             }
         }
     }
