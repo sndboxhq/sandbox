@@ -59,7 +59,88 @@ export const useCases = [
   {slug:"homelab-automation",title:"Automate services that never leave your private network",problem:"NAS devices, dashboards and home services are deliberately unreachable from hosted automation tools.",nodes:"Schedule → HTTP request → Condition → Discord webhook",target:"Raspberry Pi, NAS or Linux server",difficulty:"Intermediate",permissions:"Private network targets and Discord connection",result:"Local services are monitored from inside the network boundary."},
 ];
 
-export const launchRelease = { version:"0.8.0-beta.1", date:"Repository state", channel:"Beta", summary:"Version 8 desktop power-user preview. No public download artifact is attached to this source state.", availableArtifacts:[] as Array<{platform:string;architecture:string;url:string;size:string;checksum:string;signature:string}> };
+export const launchRelease = {
+  version: "0.8.0-beta.1",
+  date: "In development",
+  channel: "Beta",
+  title: "The power-user release.",
+  summary:
+    "sndbox 8 brings commands, code, collaboration, plugins, and desktop entry points into the same visible workflow environment.",
+  sections: [
+    {
+      title: "Command surface",
+      items: [
+        "Use a docked, resizable sndbox command console without leaving the workflow canvas.",
+        "Find workflows, inspect runs, navigate the app, and invoke the same guarded actions used by the graphical interface.",
+        "Search command completions and keep help, results, and recoverable errors inside the console.",
+      ],
+    },
+    {
+      title: "Custom functions and code",
+      items: [
+        "Edit custom JavaScript and Python functions in a full-page workspace with explicit inputs, outputs, branches, fixtures, coverage, and SHA-256 verification receipts.",
+        "Zoom source and line numbers from 75% to 400% with Ctrl or Command plus the mouse wheel.",
+        "Connect HTML, JavaScript, and CSS source nodes directly to Web Builder ports without an intermediate merge node.",
+        "Choose fail, typed fallback, or error-route behaviour, with bounded retries, backoff, cancellation, and clearer runtime diagnostics.",
+      ],
+    },
+    {
+      title: "Encrypted collaboration",
+      items: [
+        "Share live workflow edits, presence, and selections while the control plane stores only server-sequenced ciphertext.",
+        "Bootstrap a shared workflow as a disabled local copy with device approvals, credentials, plugin references, and custom-function verification removed.",
+        "Keep each machine responsible for deciding what a shared workflow is permitted to run.",
+      ],
+    },
+    {
+      title: "Windows workflow entry points",
+      items: [
+        "Open .sndbox files, drag workflows into the app, and stage legacy imports for review before saving.",
+        "Launch workflows from the quick launcher, configure a global shortcut, and opt into startup at sign-in.",
+        "Review imported permissions and warnings before an external file becomes a local workflow.",
+      ],
+    },
+    {
+      title: "Plugin development",
+      items: [
+        "Create a plugin from the new in-app Plugin Builder using the bundled SDK starter, manifest, example node, tests, and package scripts.",
+        "Write a starter only into a newly selected project folder, with native path validation and safe scaffold limits.",
+        "Continue with the SDK CLI to validate, test, build, and package the generated plugin.",
+      ],
+    },
+    {
+      title: "Runner and scheduling",
+      items: [
+        "See active and scheduled workflows, readiness, next-run details, and missing background permission directly from the runner status area.",
+        "Refresh runner state immediately when workflows change and retry without discarding the last known status when the runner is unavailable.",
+        "Repair an unambiguous stale trigger reference so a workflow trigger cannot drift away from its trigger node.",
+      ],
+    },
+    {
+      title: "Quality and reliability",
+      items: [
+        "Contain rendering and background-task failures so one broken view or service does not take down the whole app.",
+        "Recover automatically from malformed local state and keep preferences, drafts, profiles, connections, and navigation usable when browser storage is restricted.",
+        "Load independent settings and plugin services separately, with honest loading, empty, error, and retry states.",
+        "Replace subprocess panic paths with structured engine errors and preserve runner database failures instead of reporting a misleading zero state.",
+        "Add clearer destructive-action confirmations, a compact all-blue update notice, and consistently centred controls in the collapsed sidebar.",
+      ],
+    },
+  ],
+  compatibility: [
+    "Workflow schema 7 is the current v8 schema; the portable export format remains version 1.",
+    "Custom functions remain local-desktop only and must be verified again after trust-changing edits or imports.",
+    "Local schedules stop when the desktop app is fully quit. Use a paired Linux runner for always-on execution.",
+  ],
+  availableArtifacts: [] as Array<{
+    platform: string;
+    architecture: string;
+    url: string;
+    size: string;
+    checksum: string;
+    signature: string;
+  }>,
+};
 
 export const legalPages = ["terms","privacy","cookies","acceptable-use","marketplace-terms","publisher-terms","data-processing-addendum","subprocessors","vulnerability-disclosure","refunds","accessibility","complaints"] as const;
 
